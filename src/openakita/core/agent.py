@@ -375,16 +375,6 @@ class Agent:
         self._initialized = False
         self._running = False
 
-    @property
-    def _effective_tools(self) -> list[dict]:
-        """Tools available for the current call context.
-
-        Sub-agents must not have delegation tools to prevent
-        uncontrolled recursive delegation chains.
-        """
-        if self._is_sub_agent_call:
-            return [t for t in self._tools if t.get("name") not in self._agent_tool_names]
-        return self._tools
         self._last_finalized_trace: list[dict] = []
 
         # Agent profile and custom prompt (set by AgentFactory)
@@ -452,6 +442,17 @@ class Agent:
         )
 
         logger.info(f"Agent '{self.name}' created (with refactored sub-modules)")
+
+    @property
+    def _effective_tools(self) -> list[dict]:
+        """Tools available for the current call context.
+
+        Sub-agents must not have delegation tools to prevent
+        uncontrolled recursive delegation chains.
+        """
+        if self._is_sub_agent_call:
+            return [t for t in self._tools if t.get("name") not in self._agent_tool_names]
+        return self._tools
 
     def _get_tool_handler_name(self, tool_name: str) -> str | None:
         """获取工具对应的 handler 名称（用于互斥/并发策略）"""

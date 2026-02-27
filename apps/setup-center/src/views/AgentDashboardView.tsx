@@ -217,16 +217,27 @@ export function AgentDashboardView({
         const parent = n.parent_id ? map.get(n.parent_id) : null;
         let bx: number, by: number;
         if (n.is_sub_agent) {
-          // sub-agents: fan out below parent (or center if parent not found yet)
-          const siblings = topoData.nodes.filter((s) => s.parent_id === n.parent_id && s.is_sub_agent);
-          const idx = siblings.indexOf(n);
-          const count = siblings.length || 1;
-          const spread = Math.min(W * 0.6, count * 120);
-          const xOffset = count === 1 ? 0 : -spread / 2 + (idx / (count - 1)) * spread;
+          // Count ALL siblings (including already-placed ones in the map)
+          const existingSiblings = Array.from(map.values()).filter(
+            (s) => s.parent_id === n.parent_id && s.is_sub_agent
+          );
+          const totalSiblings = topoData.nodes.filter(
+            (s) => s.parent_id === n.parent_id && s.is_sub_agent
+          );
+          // My sequential index = how many siblings already placed + my order among new ones
+          const newSiblings = totalSiblings.filter((s) => !map.has(s.id));
+          const myNewIdx = newSiblings.indexOf(n);
+          const seqIdx = existingSiblings.length + Math.max(myNewIdx, 0);
+          const totalCount = Math.max(totalSiblings.length, seqIdx + 1);
+
+          // Fan out in a semicircle below parent
           const px = parent ? parent.x : CX;
-          const py = parent ? parent.y : H * 0.2;
-          bx = px + xOffset;
-          by = py + 110 + Math.random() * 30;
+          const py = parent ? parent.y : H * 0.25;
+          const fanRadius = Math.max(140, totalCount * 60);
+          const angleStep = Math.PI / Math.max(totalCount + 1, 2);
+          const angle = angleStep * (seqIdx + 1); // angles from 0 to PI (left to right)
+          bx = px + Math.cos(Math.PI - angle) * fanRadius;
+          by = py + Math.sin(angle) * fanRadius * 0.7 + 60;
         } else if (n.status === "dormant") {
           // dormant: scatter across full canvas, prefer edges
           const edge = Math.random();
@@ -346,9 +357,12 @@ export function AgentDashboardView({
           let dx = a.x - b.x;
           let dy = a.y - b.y;
           let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          // stronger repulsion to keep nodes apart; weaker for dormant pairs
-          const strength = (aDorm && bDorm) ? 6000 : (aDorm || bDorm) ? 10000 : 18000;
-          const minDist = (aDorm && bDorm) ? 80 : 100;
+          // Extra repulsion between sibling sub-agents to prevent overlap
+          const areSiblings = a.is_sub_agent && b.is_sub_agent
+            && a.parent_id && a.parent_id === b.parent_id;
+          const strength = areSiblings ? 30000
+            : (aDorm && bDorm) ? 6000 : (aDorm || bDorm) ? 10000 : 18000;
+          const minDist = areSiblings ? 120 : (aDorm && bDorm) ? 80 : 100;
           if (dist < minDist) dist = minDist;
           const repulse = strength / (dist * dist);
           const fx = (dx / dist) * repulse;
@@ -359,14 +373,25 @@ export function AgentDashboardView({
           b.vy -= fy * 0.016;
         }
 
-        // gravity: dormant → none; sub-agent → toward parent; root → gentle center
+        // gravity: dormant → none; sub-agent → fan around parent; root → gentle center
         if (!aDorm) {
           const parent = a.parent_id ? map.get(a.parent_id) : null;
           if (a.is_sub_agent) {
-            const targetX = parent ? parent.x : CX;
-            const targetY = parent ? parent.y + 120 : CY * 0.7;
-            a.vx += (targetX - a.x) * 0.008;
-            a.vy += (targetY - a.y) * 0.008;
+            // Each sub-agent targets a unique fan position around parent
+            const siblings = nodes.filter(
+              (s) => s.parent_id === a.parent_id && s.is_sub_agent
+            );
+            const myIdx = siblings.indexOf(a);
+            const count = siblings.length || 1;
+            const px = parent ? parent.x : CX;
+            const py = parent ? parent.y : H * 0.25;
+            const fanR = Math.max(140, count * 60);
+            const step = Math.PI / Math.max(count + 1, 2);
+            const ang = step * (myIdx + 1);
+            const targetX = px + Math.cos(Math.PI - ang) * fanR;
+            const targetY = py + Math.sin(ang) * fanR * 0.7 + 60;
+            a.vx += (targetX - a.x) * 0.006;
+            a.vy += (targetY - a.y) * 0.006;
           } else {
             a.vx += (CX - a.x) * 0.002;
             a.vy += (CY * 0.5 - a.y) * 0.002;
