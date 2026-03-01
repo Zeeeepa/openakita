@@ -345,18 +345,22 @@ class RetrievalEngine:
         self, query: str, recent_messages: list[dict] | None = None,
     ) -> dict | None:
         """调用 think_lightweight (compiler model) 做查询拆解."""
+        from openakita.core.tool_executor import smart_truncate as _st
+
         context_hint = ""
         if recent_messages:
             recent_texts = []
             for msg in recent_messages[-2:]:
                 c = msg.get("content", "")
                 if c and isinstance(c, str):
-                    recent_texts.append(f"[{msg.get('role', '?')}]: {c[:80]}")
+                    hint, _ = _st(c, 300, save_full=False, label="retrieval_hint")
+                    recent_texts.append(f"[{msg.get('role', '?')}]: {hint}")
             if recent_texts:
                 context_hint = f"近期对话:\n{''.join(recent_texts)}\n"
 
+        query_trunc, _ = _st(query, 500, save_full=False, label="retrieval_query")
         prompt = self.QUERY_DECOMPOSE_PROMPT.format(
-            query=query[:300], context_hint=context_hint,
+            query=query_trunc, context_hint=context_hint,
         )
 
         try:

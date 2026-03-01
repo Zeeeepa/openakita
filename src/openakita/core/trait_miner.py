@@ -149,7 +149,9 @@ class TraitMiner:
             return []
 
         try:
-            prompt = TRAIT_MINING_PROMPT.format(message=message[:500])
+            from .tool_executor import smart_truncate as _st
+            msg_trunc, _ = _st(message, 800, save_full=False, label="trait_msg")
+            prompt = TRAIT_MINING_PROMPT.format(message=msg_trunc)
             response = await self.brain.compiler_think(
                 prompt=prompt,
                 system=TRAIT_MINING_SYSTEM,

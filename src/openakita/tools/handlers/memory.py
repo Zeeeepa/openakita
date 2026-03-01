@@ -208,6 +208,7 @@ class MemoryHandler:
                         recent_messages=getattr(mm, "_recent_messages", None),
                     )
                     if candidates:
+                        from openakita.core.tool_executor import smart_truncate as _st
                         logger.info(f"[search_memory] RetrievalEngine: {len(candidates)} candidates for '{query[:50]}'")
                         cited = [{"id": c.memory_id, "content": c.content[:200]} for c in candidates[:10] if c.memory_id]
                         if cited:
@@ -217,7 +218,8 @@ class MemoryHandler:
                             ep_hint = ""
                             if hasattr(c, "episode_id") and c.episode_id:
                                 ep_hint = f", 来源情节: {c.episode_id[:12]}"
-                            output += f"- [{c.source_type}] {c.content[:200]}{ep_hint}\n\n"
+                            c_trunc, _ = _st(c.content or "", 400, save_full=False, label="mem_search")
+                            output += f"- [{c.source_type}] {c_trunc}{ep_hint}\n\n"
                         return output
                 except Exception as e:
                     logger.warning(f"[search_memory] RetrievalEngine failed: {e}")
@@ -235,7 +237,7 @@ class MemoryHandler:
                     output = f"找到 {len(memories)} 条相关记忆:\n\n"
                     for m in memories:
                         ep_hint = f", 来源情节: {m.source_episode_id[:12]}" if m.source_episode_id else ""
-                        output += f"- [{m.type.value}] {m.content}\n"
+                        output += f"- [{m.type.value}] {m.content}\n"  # Memory content 完整保留
                         output += f"  (重要性: {m.importance_score:.1f}, 引用: {m.access_count}{ep_hint})\n\n"
                     return output
             except Exception as e:
@@ -267,7 +269,7 @@ class MemoryHandler:
 
         output = f"找到 {len(memories)} 条相关记忆:\n\n"
         for m in memories:
-            ep_hint = f", 来源情节: {m.source_episode_id[:12]}" if m.source_episode_id else ""
+            ep_hint = f", 来源情节: {m.source_episode_id[:12]}" if m.source_episode_id else ""  # episode ID 是固定长度
             output += f"- [{m.type.value}] {m.content}\n"
             output += f"  (重要性: {m.importance_score:.1f}, 引用: {m.access_count}{ep_hint})\n\n"
 
@@ -492,7 +494,9 @@ class MemoryHandler:
             for mid in ep.linked_memory_ids[:10]:
                 mem = store.get_semantic(mid)
                 if mem:
-                    lines.append(f"- [{mem.type.value}] {mem.content[:150]}")
+                    from openakita.core.tool_executor import smart_truncate as _st
+                    mem_trunc, _ = _st(mem.content or "", 300, save_full=False, label="mem_linked")
+                    lines.append(f"- [{mem.type.value}] {mem_trunc}")
                 else:
                     lines.append(f"- (已删除) {mid[:12]}")
         else:

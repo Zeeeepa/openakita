@@ -213,10 +213,11 @@ class MemoryConsolidator:
             )
 
         # 使用 LLM 生成详细摘要
+        from openakita.core.tool_executor import smart_truncate as _st
         conv_text = "\n".join(
             [
-                f"[{turn.role}]: {turn.content[:300]}"
-                for turn in turns[-30:]  # 最近30轮
+                f"[{turn.role}]: {_st(turn.content or '', 600, save_full=False, label='consol_conv')[0]}"
+                for turn in turns[-30:]
             ]
         )
 
