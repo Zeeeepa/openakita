@@ -108,7 +108,7 @@ jobs:
           pip install build
       
       - name: Build package
-        run: python -m build
+        run: python -m build --wheel
       
       - name: Upload Python artifacts to GitHub Release
         uses: softprops/action-gh-release@v2

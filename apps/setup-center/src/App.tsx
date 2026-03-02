@@ -452,7 +452,7 @@ export function App() {
   const [autostartEnabled, setAutostartEnabled] = useState<boolean | null>(null);
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState<boolean | null>(null);
   // autoStartBackend 已合并到"开机自启"：--background 模式自动拉起后端，无需独立开关
-  const [serviceStatus, setServiceStatus] = useState<{ running: boolean; pid: number | null; pidFile: string } | null>(null);
+  const [serviceStatus, setServiceStatus] = useState<{ running: boolean; pid: number | null; pidFile: string; port?: number } | null>(null);
   // 心跳状态机: "alive" | "suspect" | "degraded" | "dead"
   const [heartbeatState, setHeartbeatState] = useState<"alive" | "suspect" | "degraded" | "dead">("dead");
   const heartbeatStateRef = useRef<"alive" | "suspect" | "degraded" | "dead">("dead");
