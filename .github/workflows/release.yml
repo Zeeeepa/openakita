@@ -101,6 +101,19 @@ jobs:
       - name: Check version consistency (must match tag)
         if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags') }}
         run: python scripts/version.py check --expected "${GITHUB_REF_NAME#v}"
+
+      - name: Set up Node (for web frontend build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/setup-center/package-lock.json
+
+      - name: Build web frontend
+        working-directory: apps/setup-center
+        run: |
+          npm ci
+          npm run build:web
       
       - name: Install dependencies
         run: |
@@ -233,6 +246,8 @@ jobs:
       - name: Install Python project and PyInstaller
         shell: bash
         run: |
+          # Ensure dist-web exists (required by pyproject.toml force-include; actual web build not needed for desktop)
+          mkdir -p apps/setup-center/dist-web
           if [ "${{ matrix.build_mode }}" = "full" ]; then
             pip install -e ".[all]"
           else
