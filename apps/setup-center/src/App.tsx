@@ -1,7 +1,7 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke, listen, IS_TAURI, IS_WEB, getAppVersion, onWsEvent } from "./platform";
-import { checkAuth, installFetchInterceptor, AUTH_EXPIRED_EVENT } from "./platform/auth";
+import { checkAuth, installFetchInterceptor, AUTH_EXPIRED_EVENT, isPasswordUserSet } from "./platform/auth";
 import { LoginView } from "./views/LoginView";
 import { ChatView } from "./views/ChatView";
 import { SkillManager } from "./views/SkillManager";
@@ -90,10 +90,16 @@ export function App() {
   // ── Web auth gate ──
   const [webAuthed, setWebAuthed] = useState(!IS_WEB);
   const [authChecking, setAuthChecking] = useState(IS_WEB);
+  const [showPwBanner, setShowPwBanner] = useState(false);
   useEffect(() => {
     if (!IS_WEB) return;
     checkAuth().then((ok) => {
-      if (ok) installFetchInterceptor();
+      if (ok) {
+        installFetchInterceptor();
+        if (!isPasswordUserSet() && !localStorage.getItem("openakita_pw_banner_dismissed")) {
+          setShowPwBanner(true);
+        }
+      }
       setWebAuthed(ok);
       setAuthChecking(false);
     });
@@ -7683,6 +7689,31 @@ export function App() {
           } : undefined}
           webAccessUrl={IS_TAURI && (serviceStatus?.running ?? false) ? `http://127.0.0.1:18900/web` : undefined}
         />
+
+        {showPwBanner && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, padding: "8px 16px",
+            background: "var(--warning-bg, #fef3c7)", borderBottom: "1px solid var(--warning-border, #f59e0b)",
+            color: "var(--warning-text, #92400e)", fontSize: 13,
+          }}>
+            <span style={{ flex: 1 }}>
+              {t("web.passwordBanner", { defaultValue: "当前 Web 访问密码为系统自动生成，建议前往设置页面配置自定义密码以保障远程访问安全。" })}
+            </span>
+            <button className="btnSmall" style={{ whiteSpace: "nowrap", fontWeight: 500 }} onClick={() => {
+              setView("wizard");
+              setStepId("advanced");
+              setShowPwBanner(false);
+              localStorage.setItem("openakita_pw_banner_dismissed", "1");
+            }}>{t("web.passwordBannerAction", { defaultValue: "去设置" })}</button>
+            <button style={{
+              background: "none", border: "none", cursor: "pointer", padding: 2,
+              color: "var(--warning-text, #92400e)", fontSize: 16, lineHeight: 1, opacity: 0.6,
+            }} onClick={() => {
+              setShowPwBanner(false);
+              localStorage.setItem("openakita_pw_banner_dismissed", "1");
+            }} title={t("common.close", { defaultValue: "关闭" })}>×</button>
+          </div>
+        )}
 
         {/* ChatView 始终挂载，切走时隐藏以保留聊天记录 */}
         <div className="contentChat" style={{ display: view === "chat" ? undefined : "none" }}>

@@ -166,6 +166,7 @@ class WebAccessConfig:
             self._data["password_hash"] = hash_hex
             self._data["password_salt"] = salt_hex
             self._data["password_plain_hint"] = _make_hint(generated)
+            self._data["password_user_set"] = False
             self._data["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             needs_save = True
             logger.info(
@@ -208,11 +209,16 @@ class WebAccessConfig:
             return False
         return _verify_password(password, h, s)
 
+    @property
+    def password_user_set(self) -> bool:
+        return self._data.get("password_user_set", False)
+
     def change_password(self, new_password: str) -> None:
         hash_hex, salt_hex = _hash_password(new_password)
         self._data["password_hash"] = hash_hex
         self._data["password_salt"] = salt_hex
         self._data["password_plain_hint"] = _make_hint(new_password)
+        self._data["password_user_set"] = True
         self._data["token_version"] = self.token_version + 1
         self._data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         self._save()

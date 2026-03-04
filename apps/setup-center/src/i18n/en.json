@@ -1261,5 +1261,9 @@
     "loggingIn": "Logging in...",
     "failed": "Login failed",
     "hint": "Password is auto-generated on first start. View or reset it in the Desktop Setup Center."
+  },
+  "web": {
+    "passwordBanner": "The current web access password was auto-generated. It is recommended to set a custom password in settings for remote access security.",
+    "passwordBannerAction": "Go to Settings"
   }
 }

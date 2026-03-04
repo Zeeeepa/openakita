@@ -7,11 +7,15 @@ import { IS_WEB } from "./detect";
 const ACCESS_TOKEN_KEY = "openakita_access_token";
 
 let _localAuthMode = false;
+let _passwordUserSet = true;
 
 /** Returns true if the backend granted access via local IP exemption (no token needed). */
 export function isLocalAuthMode(): boolean { return _localAuthMode; }
 
 export function setLocalAuthMode(v: boolean): void { _localAuthMode = v; }
+
+/** Returns true if the user has explicitly set a custom password (vs auto-generated). */
+export function isPasswordUserSet(): boolean { return _passwordUserSet; }
 
 // ---------------------------------------------------------------------------
 // Token storage
@@ -244,6 +248,7 @@ export async function checkAuth(apiBase = ""): Promise<boolean> {
         const data = await res.json();
         if (data.authenticated === true) {
           if (data.method === "local") _localAuthMode = true;
+          if (data.password_user_set === false) _passwordUserSet = false;
           return true;
         }
       }

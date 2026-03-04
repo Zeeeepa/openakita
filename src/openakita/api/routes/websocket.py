@@ -27,18 +27,18 @@ class ConnectionManager:
     """Manages active WebSocket connections and broadcasts events."""
 
     def __init__(self) -> None:
-        self._connections: list[WebSocket] = []
+        self._connections: list[tuple[WebSocket, bool]] = []  # (ws, is_local)
         self._lock = asyncio.Lock()
 
-    async def connect(self, ws: WebSocket) -> None:
+    async def connect(self, ws: WebSocket, *, is_local: bool = False) -> None:
         await ws.accept()
         async with self._lock:
-            self._connections.append(ws)
-        logger.debug("WebSocket client connected (total: %d)", len(self._connections))
+            self._connections.append((ws, is_local))
+        logger.debug("WebSocket client connected (local=%s, total: %d)", is_local, len(self._connections))
 
     async def disconnect(self, ws: WebSocket) -> None:
         async with self._lock:
-            self._connections = [c for c in self._connections if c is not ws]
+            self._connections = [(c, loc) for c, loc in self._connections if c is not ws]
         logger.debug("WebSocket client disconnected (total: %d)", len(self._connections))
 
     async def broadcast(self, event: str, data: Any = None) -> None:
@@ -48,13 +48,29 @@ class ConnectionManager:
         message = json.dumps({"event": event, "data": data, "ts": time.time()})
         dead: list[WebSocket] = []
         async with self._lock:
-            for ws in self._connections:
+            for ws, _loc in self._connections:
                 try:
                     await ws.send_text(message)
                 except Exception:
                     dead.append(ws)
             for ws in dead:
-                self._connections = [c for c in self._connections if c is not ws]
+                self._connections = [(c, loc) for c, loc in self._connections if c is not ws]
+
+    async def disconnect_remote_clients(self) -> int:
+        """Close all non-local WebSocket connections (e.g. after password change)."""
+        to_close: list[WebSocket] = []
+        async with self._lock:
+            to_close = [ws for ws, is_local in self._connections if not is_local]
+            self._connections = [(ws, loc) for ws, loc in self._connections if loc]
+        for ws in to_close:
+            try:
+                await ws.send_text(json.dumps({"event": "session_invalidated", "ts": time.time()}))
+                await ws.close(code=4001, reason="Password changed")
+            except Exception:
+                pass
+        if to_close:
+            logger.info("Disconnected %d remote WebSocket client(s) after password change", len(to_close))
+        return len(to_close)
 
     @property
     def client_count(self) -> int:
@@ -90,7 +106,8 @@ async def ws_events(ws: WebSocket):
         await ws.close(code=4001, reason="Authentication required")
         return
 
-    await manager.connect(ws)
+    is_local = bool(ws.client and ws.client.host in ("127.0.0.1", "::1"))
+    await manager.connect(ws, is_local=is_local)
     try:
         # Send initial connection confirmation
         await ws.send_text(json.dumps({

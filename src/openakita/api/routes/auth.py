@@ -150,21 +150,21 @@ async def check_auth(request: Request):
 
     # Local requests are always authenticated (unless behind proxy)
     if is_local:
-        return {"authenticated": True, "method": "local"}
+        return {"authenticated": True, "method": "local", "password_user_set": config.password_user_set}
 
     # Check bearer token
     auth_header = request.headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
         if config.validate_access_token(token):
-            return {"authenticated": True, "method": "token"}
+            return {"authenticated": True, "method": "token", "password_user_set": config.password_user_set}
 
     # Check refresh cookie (means user has a valid session)
     cookie = request.cookies.get(REFRESH_COOKIE_NAME)
     if cookie:
         payload = config.validate_refresh_token(cookie)
         if payload:
-            return {"authenticated": True, "method": "refresh_cookie", "needs_refresh": True}
+            return {"authenticated": True, "method": "refresh_cookie", "needs_refresh": True, "password_user_set": config.password_user_set}
 
     return {"authenticated": False}
 
@@ -181,8 +181,12 @@ async def change_password(body: ChangePasswordRequest, request: Request):
 
     config = _get_config(request)
     config.change_password(body.new_password)
-    logger.info("Web access password changed from localhost")
-    return {"status": "ok", "message": "Password changed. All remote sessions will be invalidated."}
+
+    from .websocket import manager
+    disconnected = await manager.disconnect_remote_clients()
+
+    logger.info("Web access password changed from localhost, disconnected %d remote session(s)", disconnected)
+    return {"status": "ok", "message": "Password changed. All remote sessions invalidated.", "disconnected": disconnected}
 
 
 # ── GET /api/auth/password-hint (local only) ──
