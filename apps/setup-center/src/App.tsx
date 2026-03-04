@@ -1677,6 +1677,7 @@ export function App() {
   }
 
   function httpApiBase(): string {
+    if (IS_WEB) return apiBaseUrl || "";
     return dataMode === "remote" ? apiBaseUrl : "http://127.0.0.1:18900";
   }
 
@@ -7540,7 +7541,12 @@ export function App() {
     if (authChecking) {
       return <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", color: "var(--text3, #94a3b8)" }}>Loading...</div>;
     }
-    return <LoginView apiBaseUrl="" onLoginSuccess={() => { installFetchInterceptor(); setWebAuthed(true); }} />;
+    return <LoginView apiBaseUrl="" onLoginSuccess={() => {
+      installFetchInterceptor();
+      setWebAuthed(true);
+      refreshStatus(undefined, undefined, true);
+      refreshAll();
+    }} />;
   }
 
   return (

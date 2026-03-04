@@ -65,6 +65,13 @@ def _get_config(request: Request) -> WebAccessConfig:
     return request.app.state.web_access_config
 
 
+def _is_local_from_real_ip(request: Request) -> bool:
+    """Check if request is truly from localhost, respecting TRUST_PROXY."""
+    trust_proxy = os.environ.get("TRUST_PROXY", "").lower() in ("1", "true", "yes")
+    real_ip = get_client_ip(request, trust_proxy=trust_proxy)
+    return real_ip in ("127.0.0.1", "::1")
+
+
 # ── POST /api/auth/login ──
 
 @router.post("/login")
@@ -168,7 +175,7 @@ async def check_auth(request: Request):
 
 @router.post("/change-password")
 async def change_password(body: ChangePasswordRequest, request: Request):
-    if not _is_local_request(request):
+    if not _is_local_from_real_ip(request):
         return JSONResponse(
             status_code=403,
             content={"detail": "Password can only be changed from localhost"},
@@ -184,7 +191,7 @@ async def change_password(body: ChangePasswordRequest, request: Request):
 
 @router.get("/password-hint")
 async def password_hint(request: Request):
-    if not _is_local_request(request):
+    if not _is_local_from_real_ip(request):
         return JSONResponse(
             status_code=403,
             content={"detail": "Password hint only available from localhost"},

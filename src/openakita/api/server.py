@@ -147,7 +147,21 @@ def create_app(
             content={"detail": "; ".join(msgs) if msgs else "Validation error"},
         )
 
-    # CORS configuration
+    # Web access authentication — registered BEFORE CORS so that in Starlette's
+    # middleware stack (last-added = outermost) CORS wraps auth, ensuring all
+    # responses (including 401) carry proper CORS headers.
+    try:
+        from openakita.config import settings
+        data_dir = Path(settings.project_root) / "data"
+    except Exception:
+        data_dir = Path.cwd() / "data"
+    web_access_config = WebAccessConfig(data_dir)
+    app.state.web_access_config = web_access_config
+
+    auth_mw = create_auth_middleware(web_access_config)
+    app.middleware("http")(auth_mw)
+
+    # CORS configuration (outermost middleware — added last)
     # NOTE: allow_origins=["*"] is incompatible with allow_credentials=True per
     # the browser spec.  When no explicit origins are configured we fall back to
     # allow_origin_func which echoes the request Origin, achieving the same
@@ -163,18 +177,6 @@ def create_app(
     else:
         cors_kwargs["allow_origin_func"] = lambda origin: True
     app.add_middleware(CORSMiddleware, **cors_kwargs)
-
-    # Web access authentication
-    try:
-        from openakita.config import settings
-        data_dir = Path(settings.project_root) / "data"
-    except Exception:
-        data_dir = Path.cwd() / "data"
-    web_access_config = WebAccessConfig(data_dir)
-    app.state.web_access_config = web_access_config
-
-    auth_mw = create_auth_middleware(web_access_config)
-    app.middleware("http")(auth_mw)
 
     # Store references in app state
     app.state.agent = agent

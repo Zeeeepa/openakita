@@ -178,7 +178,9 @@ export function installFetchInterceptor(): void {
     if (isSameOrigin) {
       const token = getAccessToken();
       if (token) {
-        const headers = new Headers(init?.headers);
+        const base = init?.headers
+          ?? (input instanceof Request ? input.headers : undefined);
+        const headers = new Headers(base);
         if (!headers.has("Authorization")) {
           headers.set("Authorization", `Bearer ${token}`);
         }
@@ -204,9 +206,14 @@ export async function checkAuth(apiBase = ""): Promise<boolean> {
       credentials: "include",
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return data.authenticated === true;
+    if (res.ok) {
+      const data = await res.json();
+      if (data.authenticated === true) return true;
+    }
+    // Access token missing or expired — try silent refresh via httpOnly cookie
+    const refreshed = await refreshAccessToken(apiBase);
+    if (refreshed) return true;
+    return false;
   } catch {
     return false;
   }

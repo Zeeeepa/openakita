@@ -106,11 +106,14 @@ def _hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
 
 
 def _verify_password(password: str, hash_hex: str, salt_hex: str) -> bool:
-    h = hashlib.scrypt(
-        password.encode(), salt=bytes.fromhex(salt_hex),
-        n=16384, r=8, p=1, dklen=32,
-    )
-    return hmac.compare_digest(h.hex(), hash_hex)
+    try:
+        h = hashlib.scrypt(
+            password.encode(), salt=bytes.fromhex(salt_hex),
+            n=16384, r=8, p=1, dklen=32,
+        )
+        return hmac.compare_digest(h.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
 
 
 # ---------------------------------------------------------------------------
