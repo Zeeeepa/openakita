@@ -1,24 +1,31 @@
 /**
- * 全局 fetch 拦截：代理软件运行时，macOS WKWebView 的 fetch() 遵守系统代理设置，
- * 导致对 127.0.0.1 的请求被路由到代理服务器而非直连本地后端。
+ * 全局 fetch 拦截：macOS WKWebView 的 fetch() 遵守系统代理设置，
+ * 代理软件（Clash/V2Ray 等）运行时，对 127.0.0.1 的请求会被路由到
+ * 代理服务器而非直连本地后端。
  *
- * 解决方案：用 Tauri 官方 HTTP 插件的 fetch() 替代 WebView 原生 fetch()。
- * 插件走 Rust reqwest，配合 Rust 端 NO_PROXY 环境变量绕过系统代理。
+ * 解决方案：在 Tauri 环境下，用 Tauri HTTP 插件的 fetch() 替代原生 fetch()。
+ * 插件走 Rust reqwest，配合 Rust 端设置的 NO_PROXY 环境变量绕过系统代理。
  * 支持 JSON、FormData、SSE 流式响应，与原生 fetch 行为一致。
  *
- * 非 localhost 请求不受影响，仍走浏览器原生 fetch。
- *
- * 降级策略：仅在插件不可用（如 dev server 纯浏览器环境）时降级到原生 fetch，
- * 且只降级一次（记录标记避免反复尝试）。运行时错误（网络超时、代理阻断等）
- * 不降级，直接抛出让调用方处理。
+ * 仅拦截 localhost 请求，其他请求仍走浏览器原生 fetch。
+ * 在非 Tauri 环境（如 `npm run dev` 的浏览器）下不做任何拦截。
  */
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 const LOCAL_RE = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(?:\/|$)/;
 
 export function installLocalFetchOverride(): void {
+  // Only intercept in Tauri desktop runtime.
+  // In browser dev server (`npm run dev`), Tauri IPC bridge doesn't exist
+  // and the plugin would throw — skip entirely so native fetch works as-is.
+  if (
+    typeof window === "undefined" ||
+    !("__TAURI_INTERNALS__" in window)
+  ) {
+    return;
+  }
+
   const nativeFetch = window.fetch.bind(window);
-  let pluginUnavailable = false;
 
   window.fetch = async function (
     input: RequestInfo | URL,
@@ -34,26 +41,10 @@ export function installLocalFetchOverride(): void {
       return nativeFetch(input, init);
     }
 
-    if (pluginUnavailable) {
-      return nativeFetch(input, init);
-    }
-
-    try {
-      return await tauriFetch(input, init);
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") throw e;
-      if (init?.signal?.aborted) {
-        throw new DOMException("The operation was aborted.", "AbortError");
-      }
-      // Plugin init/scope errors (e.g. running outside Tauri) → fall back permanently.
-      // Runtime HTTP errors (connection refused, timeout, proxy block) → propagate.
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("not found") || msg.includes("plugin") || msg.includes("not initialized")) {
-        console.warn("[localFetch] Tauri HTTP plugin unavailable, falling back to native fetch:", msg);
-        pluginUnavailable = true;
-        return nativeFetch(input, init);
-      }
-      throw e;
-    }
+    // Route through Tauri HTTP plugin (Rust reqwest + NO_PROXY env).
+    // No fallback to native fetch: on macOS with proxy software, native fetch
+    // also goes through WebKit system proxy and would fail the same way.
+    // Errors (connection refused, timeout, etc.) propagate to the caller.
+    return tauriFetch(input, init);
   };
 }

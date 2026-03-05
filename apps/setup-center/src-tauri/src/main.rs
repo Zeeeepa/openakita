@@ -1714,19 +1714,30 @@ fn startup_reconcile() {
 }
 
 fn main() {
-    // Bypass system proxy for all localhost connections.
+    // Ensure localhost is always excluded from proxy resolution.
     //
-    // macOS: proxy apps (Clash/V2Ray) set system proxy via Network Preferences.
-    //   hyper-util links `system-configuration` and reads these settings, causing
-    //   ALL reqwest clients (including Tauri HTTP plugin's) to route 127.0.0.1
-    //   traffic through the proxy — which fails.
-    // Windows: similar issue with system proxy set via Internet Options.
+    // macOS: Clash/V2Ray set system proxy via Network Preferences. hyper-util
+    //   links `system-configuration` and reads these settings, so ALL reqwest
+    //   clients (including Tauri HTTP plugin's) would route 127.0.0.1 through
+    //   the proxy — which fails because the backend only listens locally.
+    // Windows: similar issue with system proxy via Internet Options.
     //
-    // Setting NO_PROXY before any HTTP client is created ensures reqwest/hyper-util
-    // skips proxy for localhost regardless of system proxy configuration.
-    // This is complementary to the explicit .no_proxy() on our own reqwest clients.
-    if std::env::var("NO_PROXY").is_err() {
-        std::env::set_var("NO_PROXY", "localhost,127.0.0.1,[::1]");
+    // We APPEND to any existing NO_PROXY/no_proxy rather than overwrite, so
+    // user-defined exclusions (e.g. *.corp.com) are preserved.
+    // Both cases are set because different libraries check different variants.
+    {
+        const LOCALS: &str = "localhost,127.0.0.1,[::1]";
+        for key in ["NO_PROXY", "no_proxy"] {
+            let cur = std::env::var(key).unwrap_or_default();
+            if !cur.contains("127.0.0.1") {
+                let val = if cur.is_empty() {
+                    LOCALS.to_string()
+                } else {
+                    format!("{cur},{LOCALS}")
+                };
+                std::env::set_var(key, &val);
+            }
+        }
     }
 
     // Workaround: NVIDIA drivers on Linux can cause a blank WebKitGTK window
