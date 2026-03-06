@@ -959,6 +959,9 @@
       "skip": "跳过，稍后设置",
       "skipShort": "跳过"
     },
+    "modules": {
+      "startInstall": "开始安装"
+    },
     "system": {
       "title": "终端命令与系统设置",
       "desc": "注册命令行工具，配置开机自启等系统选项。"

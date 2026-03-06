@@ -959,6 +959,9 @@
       "skip": "Skip, set up later",
       "skipShort": "Skip"
     },
+    "modules": {
+      "startInstall": "Start Installation"
+    },
     "system": {
       "title": "CLI & System Settings",
       "desc": "Register command-line tools and configure system options like auto-start."
