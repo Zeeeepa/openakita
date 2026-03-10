@@ -572,9 +572,7 @@ class OrgRuntime:
 
         Returns (response_text, timed_out).
         """
-        default_timeout = 300
-        if node.parent_id is None:
-            default_timeout = 600
+        default_timeout = 600 if node.level == 0 else 300
         timeout = node.timeout_s if node.timeout_s > 0 else default_timeout
         try:
             response = await asyncio.wait_for(
