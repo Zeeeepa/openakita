@@ -618,8 +618,8 @@ export function OrgEditorView({
   type ActivityEvent = { id: string; time: number; event: string; data: any };
   const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>([]);
   const [showActivityFeed, setShowActivityFeed] = useState(true);
-  const [bottomTab, setBottomTab] = useState<"activity" | "chat">("activity");
-  const [viewMode, setViewMode] = useState<"canvas" | "dashboard" | "projects">("canvas");
+  const [bottomTab, setBottomTab] = useState<"activity" | "projects" | "chat">("activity");
+  const [viewMode, setViewMode] = useState<"canvas" | "dashboard">("canvas");
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
   const [chatPanelNode, setChatPanelNode] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: "node" | "edge" | "pane"; id: string | null } | null>(null);
@@ -1556,15 +1556,15 @@ export function OrgEditorView({
             <div className="org-tb-group" data-label="视图">
               <button
                 className="btnSmall"
-                onClick={() => { autoSave(); setViewMode(viewMode === "canvas" ? "dashboard" : viewMode === "dashboard" ? "projects" : "canvas"); }}
+                onClick={() => { autoSave(); setViewMode(viewMode === "canvas" ? "dashboard" : "canvas"); }}
                 style={{
-                  fontWeight: viewMode !== "canvas" ? 600 : 400,
-                  color: viewMode === "dashboard" ? "#8b5cf6" : viewMode === "projects" ? "#f59e0b" : undefined,
-                  background: viewMode === "dashboard" ? "rgba(139,92,246,0.1)" : viewMode === "projects" ? "rgba(245,158,11,0.1)" : undefined,
+                  fontWeight: viewMode === "dashboard" ? 600 : 400,
+                  color: viewMode === "dashboard" ? "#8b5cf6" : undefined,
+                  background: viewMode === "dashboard" ? "rgba(139,92,246,0.1)" : undefined,
                 }}
-                title={viewMode === "canvas" ? "运营看板" : viewMode === "dashboard" ? "项目看板" : "画布视图"}
+                title={viewMode === "canvas" ? "运营看板" : "画布视图"}
               >
-                <IconClipboard size={12} /> {!isMobile && (viewMode === "canvas" ? "看板" : viewMode === "dashboard" ? "项目" : "画布")}
+                <IconClipboard size={12} /> {!isMobile && (viewMode === "canvas" ? "看板" : "画布")}
               </button>
               <button
                 className="btnSmall"
@@ -1907,14 +1907,6 @@ export function OrgEditorView({
                 }}
               />
             </div>
-          ) : viewMode === "projects" ? (
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <OrgProjectBoard
-                orgId={currentOrg.id}
-                apiBaseUrl={apiBaseUrl}
-                nodes={nodes.map(n => ({ id: n.id, role_title: (n.data as any)?.role_title, avatar: (n.data as any)?.avatar }))}
-              />
-            </div>
           ) : (
           <div style={{ flex: 1 }}>
             <ReactFlow
@@ -2031,20 +2023,22 @@ export function OrgEditorView({
           {/* Bottom Panel: Activity Feed + Org Chat */}
           {liveMode && showActivityFeed && (
             <div style={{
-              height: 200, borderTop: "1px solid var(--line)", background: "var(--bg-app)",
+              height: bottomTab === "projects" ? 280 : 200,
+              borderTop: "1px solid var(--line)", background: "var(--bg-app)",
               flexShrink: 0, fontSize: 11, display: "flex", flexDirection: "column",
+              transition: "height 0.2s ease",
             }}>
               {/* Bottom panel tab bar */}
               <div style={{ padding: "0 10px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--line)", background: "var(--bg-app)", zIndex: 1, flexShrink: 0 }}>
                 <div style={{ display: "flex", gap: 0 }}>
-                  {(["activity", "chat"] as const).map(tab => (
+                  {(["activity", "projects", "chat"] as const).map(tab => (
                     <button key={tab} className="btnSmall" onClick={() => setBottomTab(tab)} style={{
                       fontSize: 11, fontWeight: bottomTab === tab ? 600 : 400, padding: "6px 12px",
                       borderBottom: bottomTab === tab ? "2px solid var(--accent)" : "2px solid transparent",
                       color: bottomTab === tab ? "var(--accent)" : "var(--muted)",
                       background: "transparent", border: "none", borderRadius: 0, cursor: "pointer",
                     }}>
-                      {tab === "activity" ? "活动流" : "组织对话"}
+                      {tab === "activity" ? "活动流" : tab === "projects" ? "项目" : "组织对话"}
                     </button>
                   ))}
                 </div>
@@ -2138,6 +2132,23 @@ export function OrgEditorView({
                 })
               )}
               </div>
+              )}
+
+              {/* Projects tab */}
+              {bottomTab === "projects" && selectedOrgId && (
+                <div style={{ flex: 1, overflow: "hidden" }}>
+                  <OrgProjectBoard
+                    orgId={selectedOrgId}
+                    apiBaseUrl={apiBaseUrl}
+                    nodes={nodes.map(n => ({ id: n.id, role_title: (n.data as any)?.role_title, avatar: (n.data as any)?.avatar }))}
+                    compact
+                  />
+                </div>
+              )}
+              {bottomTab === "projects" && !selectedOrgId && (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)" }}>
+                  请先选择一个组织
+                </div>
               )}
 
               {/* Chat tab */}

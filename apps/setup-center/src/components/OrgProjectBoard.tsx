@@ -38,6 +38,7 @@ interface OrgProjectBoardProps {
   orgId: string;
   apiBaseUrl: string;
   nodes?: Array<{ id: string; role_title?: string; avatar?: string | null }>;
+  compact?: boolean;
 }
 
 const COLUMNS = [
@@ -62,7 +63,7 @@ const PROJECT_STATUS_LABEL: Record<string, string> = {
   archived: "已归档",
 };
 
-export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [] }: OrgProjectBoardProps) {
+export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [], compact = false }: OrgProjectBoardProps) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,8 +160,8 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [] }: OrgProjectBoa
     <div style={{ height: "100%", display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg-app)" }}>
       {/* Project tabs */}
       <div style={{
-        display: "flex", alignItems: "center", gap: 6,
-        padding: "8px 12px", borderBottom: "1px solid var(--line)",
+        display: "flex", alignItems: "center", gap: compact ? 4 : 6,
+        padding: compact ? "4px 8px" : "8px 12px", borderBottom: "1px solid var(--line)",
         flexShrink: 0, overflowX: "auto", flexWrap: "nowrap",
       }}>
         {projects.map(p => (
@@ -168,14 +169,15 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [] }: OrgProjectBoa
             key={p.id}
             onClick={() => setSelectedProjectId(p.id)}
             style={{
-              padding: "5px 12px", borderRadius: 6, border: "1px solid var(--line)",
+              padding: compact ? "2px 8px" : "5px 12px", borderRadius: 6, border: "1px solid var(--line)",
               background: p.id === selectedProjectId ? "var(--accent)" : "var(--bg-subtle, var(--bg-card))",
               color: p.id === selectedProjectId ? "#fff" : "var(--text)",
-              cursor: "pointer", fontSize: 12, fontWeight: p.id === selectedProjectId ? 600 : 400,
+              cursor: "pointer", fontSize: compact ? 11 : 12, fontWeight: p.id === selectedProjectId ? 600 : 400,
               whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4,
             }}
           >
             {p.name}
+            {!compact && (
             <span style={{
               fontSize: 9, padding: "1px 4px", borderRadius: 3,
               background: p.id === selectedProjectId ? "rgba(255,255,255,0.2)" : "var(--bg-app)",
@@ -183,13 +185,14 @@ export function OrgProjectBoard({ orgId, apiBaseUrl, nodes = [] }: OrgProjectBoa
             }}>
               {PROJECT_TYPE_LABEL[p.project_type] || p.project_type}
             </span>
+            )}
           </button>
         ))}
         <button
           onClick={() => setShowNewProject(true)}
           style={{
-            padding: "5px 12px", borderRadius: 6, border: "1px dashed var(--line)",
-            background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: 12,
+            padding: compact ? "2px 8px" : "5px 12px", borderRadius: 6, border: "1px dashed var(--line)",
+            background: "transparent", color: "var(--muted)", cursor: "pointer", fontSize: compact ? 11 : 12,
           }}
         >
           + 新项目
