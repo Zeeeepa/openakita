@@ -11,6 +11,7 @@ import { Loader2 } from "lucide-react";
 import { safeFetch } from "../providers";
 import { toast } from "sonner";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -1310,7 +1311,17 @@ export function SkillManager({
             value="installed"
             className="text-sm min-w-[5.5rem] data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:border-primary"
           >
-            {t("skills.installed")} ({skillsWithConfig.length})
+            {t("skills.installed")}
+            <Badge
+              variant="secondary"
+              className={
+                tab === "installed"
+                  ? "ml-1.5 px-1.5 py-0 text-[11px] min-w-[1.25rem] justify-center rounded-full bg-white/25 text-primary-foreground"
+                  : "ml-1.5 px-1.5 py-0 text-[11px] min-w-[1.25rem] justify-center rounded-full bg-foreground/10 text-foreground/60"
+              }
+            >
+              {skillsWithConfig.length}
+            </Badge>
           </ToggleGroupItem>
           <ToggleGroupItem
             value="marketplace"

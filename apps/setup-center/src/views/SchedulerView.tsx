@@ -686,7 +686,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
         "ml-1.5 px-1.5 py-0 text-[11px] min-w-[1.25rem] justify-center rounded-full",
         activeTab === tab
           ? "bg-white/25 text-primary-foreground"
-          : "bg-muted text-muted-foreground",
+          : "bg-foreground/10 text-foreground/60",
       )}
     >
       {count}
@@ -922,7 +922,7 @@ export function SchedulerView({ serviceRunning, apiBaseUrl = "" }: { serviceRunn
                     {task.name}
                   </span>
                   {!task.deletable && (
-                    <Badge variant="secondary" className="text-[10px] px-1.5 py-0 opacity-70">{t("scheduler.system")}</Badge>
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">{t("scheduler.system")}</Badge>
                   )}
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
                     {task.task_type === "reminder" ? t("scheduler.typeReminder") : t("scheduler.typeTask")}
