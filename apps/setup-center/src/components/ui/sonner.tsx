@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom"
 import {
   CircleCheckIcon,
   InfoIcon,
@@ -15,7 +16,7 @@ function useDocTheme() {
 const Toaster = ({ ...props }: ToasterProps) => {
   const theme = useDocTheme()
 
-  return (
+  const toaster = (
     <Sonner
       theme={theme}
       className="toaster group"
@@ -32,11 +33,14 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
           "--border-radius": "var(--radius)",
+          zIndex: 99999,
         } as React.CSSProperties
       }
       {...props}
     />
   )
+
+  return createPortal(toaster, document.body)
 }
 
 export { Toaster }
