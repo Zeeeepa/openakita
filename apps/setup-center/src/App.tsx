@@ -1437,9 +1437,15 @@ export function App() {
           if (!slugSet.has(bp.slug)) parsed.push(bp);
         }
       }
+      const bottomSlugs = new Set(["ollama", "lmstudio", "custom"]);
+      const top = parsed.filter(p => !bottomSlugs.has(p.slug));
+      const bottom = ["ollama", "lmstudio", "custom"]
+        .map(s => parsed.find(p => p.slug === s))
+        .filter(Boolean) as ProviderInfo[];
+      parsed = [...top, ...bottom];
       setProviders(parsed);
-      const first = parsed[0]?.slug ?? "";
-      setProviderSlug((prev) => prev || first);
+      const defaultSlug = parsed.find(p => p.slug === "openai")?.slug ?? parsed[0]?.slug ?? "";
+      setProviderSlug((prev) => prev || defaultSlug);
 
       // 非关键：获取版本号（仅后端未运行时尝试 venv 方式）
       if (!shouldUseHttpApi()) {
@@ -1453,9 +1459,15 @@ export function App() {
     } catch (e) {
       logger.warn("App", "doLoadProviders failed", { error: String(e) });
       if (providers.length === 0) {
-        setProviders(BUILTIN_PROVIDERS);
-        const first = BUILTIN_PROVIDERS[0]?.slug ?? "";
-        setProviderSlug((prev) => prev || first);
+        const bottomSlugs2 = new Set(["ollama", "lmstudio", "custom"]);
+        const top2 = BUILTIN_PROVIDERS.filter(p => !bottomSlugs2.has(p.slug));
+        const bottom2 = ["ollama", "lmstudio", "custom"]
+          .map(s => BUILTIN_PROVIDERS.find(p => p.slug === s))
+          .filter(Boolean) as ProviderInfo[];
+        const sorted = [...top2, ...bottom2];
+        setProviders(sorted);
+        const defaultSlug2 = sorted.find(p => p.slug === "openai")?.slug ?? sorted[0]?.slug ?? "";
+        setProviderSlug((prev) => prev || defaultSlug2);
       }
     } finally {
       dismissLoading(_busyId);
@@ -4246,7 +4258,7 @@ export function App() {
   function openAddEpDialog() {
     resetEndpointEditor();
     setConnTestResult(null);
-    setProviderSlug(providers[0]?.slug ?? "");
+    setProviderSlug(providers.find(p => p.slug === "openai")?.slug ?? providers[0]?.slug ?? "");
     setApiType("openai");
     setBaseUrl("");
     setBaseUrlTouched(false);
