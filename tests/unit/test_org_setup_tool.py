@@ -7,6 +7,7 @@ Validates:
 4. create_from_template delegates to OrgManager
 5. agent_profile_id mapping and agent_source auto-set
 6. Tool registered only when multi_agent_enabled
+7. list_orgs / get_org / update_org / delete_org (CRUD)
 """
 
 from __future__ import annotations
@@ -305,3 +306,404 @@ class TestToolRegistration:
         mock_agent = MagicMock()
         handler_fn = create_handler(mock_agent)
         assert callable(handler_fn)
+
+    def test_action_enum_includes_new_actions(self):
+        from openakita.tools.definitions.org_setup import ORG_SETUP_TOOLS
+        tool = ORG_SETUP_TOOLS[0]
+        actions = tool["input_schema"]["properties"]["action"]["enum"]
+        for a in ("list_orgs", "get_org", "update_org", "delete_org"):
+            assert a in actions, f"Missing action: {a}"
+
+    def test_schema_has_org_id(self):
+        from openakita.tools.definitions.org_setup import ORG_SETUP_TOOLS
+        props = ORG_SETUP_TOOLS[0]["input_schema"]["properties"]
+        assert "org_id" in props
+
+    def test_schema_has_update_nodes(self):
+        from openakita.tools.definitions.org_setup import ORG_SETUP_TOOLS
+        props = ORG_SETUP_TOOLS[0]["input_schema"]["properties"]
+        assert "update_nodes" in props
+        assert "remove_nodes" in props
+        assert "update_fields" in props
+
+
+# ============================================================
+# list_orgs / get_org / update_org / delete_org tests
+# ============================================================
+
+@pytest.fixture
+def created_org(handler, tmp_data_dir):
+    """Create a test org and return (org_id, data_dir)."""
+    from openakita.orgs.manager import OrgManager
+    manager = OrgManager(tmp_data_dir)
+    org = manager.create({
+        "name": "测试修改组织",
+        "description": "用于测试修改",
+        "core_business": "软件开发",
+        "nodes": [
+            {
+                "id": "node_root",
+                "role_title": "CTO",
+                "role_goal": "技术方向",
+                "department": "技术部",
+                "level": 0,
+                "agent_source": "ref:architect",
+                "agent_profile_id": "architect",
+                "external_tools": ["research", "filesystem"],
+                "position": {"x": 400, "y": 0},
+            },
+            {
+                "id": "node_dev",
+                "role_title": "开发工程师",
+                "role_goal": "写代码",
+                "department": "技术部",
+                "level": 1,
+                "agent_source": "ref:code-assistant",
+                "agent_profile_id": "code-assistant",
+                "external_tools": ["filesystem", "research"],
+                "position": {"x": 400, "y": 180},
+            },
+            {
+                "id": "node_qa",
+                "role_title": "QA 测试",
+                "role_goal": "质量保障",
+                "department": "技术部",
+                "level": 1,
+                "agent_source": "ref:code-assistant",
+                "agent_profile_id": "code-assistant",
+                "external_tools": ["filesystem"],
+                "position": {"x": 650, "y": 180},
+            },
+        ],
+        "edges": [
+            {"id": "edge_1", "source": "node_root", "target": "node_dev",
+             "edge_type": "hierarchy", "bidirectional": True},
+            {"id": "edge_2", "source": "node_root", "target": "node_qa",
+             "edge_type": "hierarchy", "bidirectional": True},
+        ],
+    })
+    return org.id, tmp_data_dir
+
+
+def _fresh_manager(data_dir):
+    """Create a fresh OrgManager to bypass in-memory cache."""
+    from openakita.orgs.manager import OrgManager
+    return OrgManager(data_dir)
+
+
+class TestListOrgs:
+    """Test action=list_orgs."""
+
+    def test_list_empty(self, handler, tmp_data_dir):
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = tmp_data_dir
+            result = handler._list_orgs()
+        assert "没有任何组织" in result
+
+    def test_list_returns_existing(self, handler, tmp_data_dir, created_org):
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = handler._list_orgs()
+        assert "测试修改组织" in result
+        assert org_id in result
+        assert "节点: 3" in result
+
+
+class TestGetOrg:
+    """Test action=get_org."""
+
+    def test_get_org_missing_id(self, handler):
+        result = handler._get_org({})
+        assert "❌" in result
+
+    def test_get_org_not_found(self, handler, tmp_data_dir):
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = tmp_data_dir
+            result = handler._get_org({"org_id": "nonexistent"})
+        assert "❌" in result
+        assert "不存在" in result
+
+    def test_get_org_returns_structure(self, handler, tmp_data_dir, created_org):
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = handler._get_org({"org_id": org_id})
+        assert "测试修改组织" in result
+        assert "CTO" in result
+        assert "开发工程师" in result
+        assert "QA 测试" in result
+        assert "node_root" in result
+        assert "node_dev" in result
+        assert "→" in result
+
+    def test_get_org_shows_agent(self, handler, tmp_data_dir, created_org):
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = handler._get_org({"org_id": org_id})
+        assert "architect" in result
+        assert "code-assistant" in result
+
+
+class TestUpdateOrg:
+    """Test action=update_org."""
+
+    @pytest.mark.asyncio
+    async def test_update_missing_org_id(self, handler):
+        result = await handler._update_org({})
+        assert "❌" in result
+
+    @pytest.mark.asyncio
+    async def test_update_nonexistent_org(self, handler, tmp_data_dir):
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = tmp_data_dir
+            result = await handler._update_org({"org_id": "nonexistent"})
+        assert "❌" in result
+        assert "不存在" in result
+
+    @pytest.mark.asyncio
+    async def test_update_modify_node_by_id(self, handler, tmp_data_dir, created_org):
+        """Modify an existing node by node_id — should preserve ID."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._update_org({
+                "org_id": org_id,
+                "update_nodes": [
+                    {
+                        "node_id": "node_dev",
+                        "role_title": "高级开发工程师",
+                        "agent_profile_id": "architect",
+                    }
+                ],
+            })
+        assert "✅" in result
+        assert "修改节点" in result
+
+        org = _fresh_manager(data_dir).get(org_id)
+        dev = next(n for n in org.nodes if n.id == "node_dev")
+        assert dev.role_title == "高级开发工程师"
+        assert dev.agent_profile_id == "architect"
+        assert dev.agent_source == "ref:architect"
+
+    @pytest.mark.asyncio
+    async def test_update_modify_node_by_title(self, handler, tmp_data_dir, created_org):
+        """Modify an existing node by role_title match."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._update_org({
+                "org_id": org_id,
+                "update_nodes": [
+                    {
+                        "role_title": "QA 测试",
+                        "role_goal": "自动化测试 + 性能测试",
+                    }
+                ],
+            })
+        assert "✅" in result
+
+        org = _fresh_manager(data_dir).get(org_id)
+        qa = next(n for n in org.nodes if n.id == "node_qa")
+        assert qa.role_goal == "自动化测试 + 性能测试"
+        assert qa.id == "node_qa"
+
+    @pytest.mark.asyncio
+    async def test_update_add_new_node(self, handler, tmp_data_dir, created_org):
+        """Add a new node to an existing org."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._update_org({
+                "org_id": org_id,
+                "update_nodes": [
+                    {
+                        "role_title": "数据工程师",
+                        "role_goal": "数据管道建设",
+                        "department": "技术部",
+                        "level": 1,
+                        "agent_profile_id": "data-analyst",
+                        "parent_role_title": "CTO",
+                    }
+                ],
+            })
+        assert "✅" in result
+        assert "新增节点" in result
+
+        org = _fresh_manager(data_dir).get(org_id)
+        assert len(org.nodes) == 4
+        new_node = next(n for n in org.nodes if n.role_title == "数据工程师")
+        assert new_node.agent_profile_id == "data-analyst"
+        assert new_node.id.startswith("node_")
+
+        parent_edges = [e for e in org.edges if e.target == new_node.id]
+        assert len(parent_edges) == 1
+        assert parent_edges[0].source == "node_root"
+
+    @pytest.mark.asyncio
+    async def test_update_remove_node(self, handler, tmp_data_dir, created_org):
+        """Remove a node and verify edges are cleaned up."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._update_org({
+                "org_id": org_id,
+                "remove_nodes": ["QA 测试"],
+            })
+        assert "✅" in result
+        assert "删除节点" in result
+
+        org = _fresh_manager(data_dir).get(org_id)
+        assert len(org.nodes) == 2
+        assert not any(n.id == "node_qa" for n in org.nodes)
+        assert not any(e.target == "node_qa" or e.source == "node_qa" for e in org.edges)
+
+    @pytest.mark.asyncio
+    async def test_update_remove_node_by_id(self, handler, tmp_data_dir, created_org):
+        """Remove a node by ID."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._update_org({
+                "org_id": org_id,
+                "remove_nodes": ["node_qa"],
+            })
+        assert "✅" in result
+
+        org = _fresh_manager(data_dir).get(org_id)
+        assert not any(n.id == "node_qa" for n in org.nodes)
+
+    @pytest.mark.asyncio
+    async def test_update_org_fields(self, handler, tmp_data_dir, created_org):
+        """Update top-level org fields."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._update_org({
+                "org_id": org_id,
+                "update_fields": {
+                    "name": "重命名组织",
+                    "core_business": "AI 产品开发",
+                },
+            })
+        assert "✅" in result
+
+        org = _fresh_manager(data_dir).get(org_id)
+        assert org.name == "重命名组织"
+        assert org.core_business == "AI 产品开发"
+
+    @pytest.mark.asyncio
+    async def test_update_no_changes(self, handler, tmp_data_dir, created_org):
+        """No modifications should report no changes."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._update_org({"org_id": org_id})
+        assert "未检测到" in result
+
+    @pytest.mark.asyncio
+    async def test_update_preserves_unmentioned_nodes(self, handler, tmp_data_dir, created_org):
+        """Nodes not mentioned in update_nodes should be preserved."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            await handler._update_org({
+                "org_id": org_id,
+                "update_nodes": [
+                    {"node_id": "node_dev", "role_goal": "写高质量代码"},
+                ],
+            })
+
+        org = _fresh_manager(data_dir).get(org_id)
+        assert len(org.nodes) == 3
+        qa = next(n for n in org.nodes if n.id == "node_qa")
+        assert qa.role_title == "QA 测试"
+
+    @pytest.mark.asyncio
+    async def test_update_combined_add_remove_modify(self, handler, tmp_data_dir, created_org):
+        """Combine add + remove + modify in one call."""
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._update_org({
+                "org_id": org_id,
+                "remove_nodes": ["node_qa"],
+                "update_nodes": [
+                    {"node_id": "node_dev", "role_title": "全栈工程师"},
+                    {
+                        "role_title": "DevOps",
+                        "level": 1,
+                        "agent_profile_id": "devops-engineer",
+                        "parent_role_title": "CTO",
+                    },
+                ],
+                "update_fields": {"description": "重构后的技术团队"},
+            })
+        assert "✅" in result
+
+        org = _fresh_manager(data_dir).get(org_id)
+        assert len(org.nodes) == 3
+        assert org.description == "重构后的技术团队"
+        assert any(n.role_title == "全栈工程师" for n in org.nodes)
+        assert any(n.role_title == "DevOps" for n in org.nodes)
+        assert not any(n.id == "node_qa" for n in org.nodes)
+
+
+class TestDeleteOrg:
+    """Test action=delete_org."""
+
+    @pytest.mark.asyncio
+    async def test_delete_missing_org_id(self, handler):
+        result = await handler._delete_org({})
+        assert "❌" in result
+
+    @pytest.mark.asyncio
+    async def test_delete_nonexistent(self, handler, tmp_data_dir):
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = tmp_data_dir
+            result = await handler._delete_org({"org_id": "nonexistent"})
+        assert "❌" in result
+        assert "不存在" in result
+
+    @pytest.mark.asyncio
+    async def test_delete_success(self, handler, tmp_data_dir, created_org):
+        org_id, data_dir = created_org
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = data_dir
+            result = await handler._delete_org({"org_id": org_id})
+        assert "✅" in result
+        assert "测试修改组织" in result
+        assert _fresh_manager(data_dir).get(org_id) is None
+
+
+class TestHandleDispatch:
+    """Test that handle() correctly dispatches all actions."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_list_orgs(self, handler, tmp_data_dir):
+        with patch("openakita.config.settings") as ms:
+            ms.data_dir = tmp_data_dir
+            result = await handler.handle("setup_organization", {"action": "list_orgs"})
+        assert "没有任何组织" in result or "现有组织" in result
+
+    @pytest.mark.asyncio
+    async def test_dispatch_get_org(self, handler):
+        result = await handler.handle("setup_organization", {"action": "get_org"})
+        assert "❌" in result
+
+    @pytest.mark.asyncio
+    async def test_dispatch_update_org(self, handler):
+        result = await handler.handle("setup_organization", {"action": "update_org"})
+        assert "❌" in result
+
+    @pytest.mark.asyncio
+    async def test_dispatch_delete_org(self, handler):
+        result = await handler.handle("setup_organization", {"action": "delete_org"})
+        assert "❌" in result
+
+    @pytest.mark.asyncio
+    async def test_dispatch_invalid_action(self, handler):
+        result = await handler.handle("setup_organization", {"action": "invalid"})
+        assert "❌" in result
+        assert "list_orgs" in result
