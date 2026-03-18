@@ -233,6 +233,64 @@ class QQBotOnboard:
             "bot_uin": str(inner.get("bot_uin", "")),
         }
 
+    async def poll_and_create(self, session_id: str) -> dict[str, Any]:
+        """原子操作：poll 确认登录态 + 创建机器人（同一 httpx 客户端保持 cookie）
+
+        前端在检测到 poll 返回 ok 后调用此方法。此方法会再做一次 poll
+        以在当前 httpx 客户端中获取登录态 cookie，然后立即调用 create_bot。
+
+        如果 create_bot 失败（如配额不足），自动 fallback 到 list_bots
+        获取最近创建的机器人信息。
+
+        Returns:
+            仍在等待: {"status": "waiting"}
+            创建成功: {"status": "ok", "app_id": "...", "app_secret": "...", ...}
+            已有机器人: {"status": "ok", "app_id": "...", "app_secret": "", ...}
+
+        Raises:
+            QQBotOnboardError: poll 失败或创建失败且无 fallback
+        """
+        poll_result = await self.poll(session_id)
+
+        if poll_result["status"] == "waiting":
+            return {"status": "waiting"}
+
+        if poll_result["status"] == "error":
+            raise QQBotOnboardError(poll_result.get("message", "登录失败"))
+
+        developer_id = poll_result.get("developer_id", "")
+
+        try:
+            bot = await self.create_bot()
+            bot["status"] = "ok"
+            return bot
+        except QQBotOnboardError as e:
+            logger.warning(f"lite_create 失败，尝试 list_bots fallback: {e}")
+
+        if not developer_id:
+            raise QQBotOnboardError("创建失败且无法获取已有机器人列表（缺少 developer_id）")
+
+        apps = await self.list_bots(developer_id)
+        lite_bots = [a for a in apps if a.get("is_lite_bot")]
+        if not lite_bots:
+            lite_bots = apps
+
+        if lite_bots:
+            newest = lite_bots[-1]
+            return {
+                "status": "ok",
+                "app_id": str(newest.get("app_id", "")),
+                "app_secret": "",
+                "bot_name": newest.get("app_name", ""),
+                "bot_uin": str(newest.get("bot_uin", "")),
+                "needs_secret": True,
+            }
+
+        raise QQBotOnboardError(
+            "创建机器人失败且未找到已有机器人。"
+            "请前往 https://q.qq.com/qqbot/openclaw/ 手动操作。"
+        )
+
 
 async def validate_credentials(
     app_id: str,

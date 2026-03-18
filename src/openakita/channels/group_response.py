@@ -1,10 +1,12 @@
 """
 群聊响应策略
 
-三种模式:
+五种模式:
 - always:       所有群消息都响应
 - mention_only: 仅被@时才响应（默认）
 - smart:        消息送给 Agent，由 AI 判断是否需要回复
+- allowlist:    仅白名单群聊才响应（需配合 GroupPolicyConfig 使用）
+- disabled:     完全禁用群聊响应
 """
 
 import asyncio
@@ -20,6 +22,8 @@ class GroupResponseMode(str, Enum):
     ALWAYS = "always"
     MENTION_ONLY = "mention_only"
     SMART = "smart"
+    ALLOWLIST = "allowlist"
+    DISABLED = "disabled"
 
 
 class SmartModeThrottle:
@@ -89,14 +93,19 @@ class SmartModeThrottle:
         """记录给该群发了回复，开始冷却"""
         self._last_reply_time[chat_id] = time.monotonic()
 
+    _MAX_BUFFER_SIZE = 50
+
     def buffer_message(self, chat_id: str, text: str, user_id: str) -> int:
         """缓冲一条非@消息，返回当前缓冲区大小"""
-        self._buffer[chat_id].append({
+        buf = self._buffer[chat_id]
+        if len(buf) >= self._MAX_BUFFER_SIZE:
+            buf.pop(0)
+        buf.append({
             "text": text,
             "user_id": user_id,
             "time": time.monotonic(),
         })
-        return len(self._buffer[chat_id])
+        return len(buf)
 
     def drain_buffer(self, chat_id: str) -> list[dict]:
         """取出并清空该群的缓冲消息"""

@@ -2721,12 +2721,15 @@ fn main() {
             openakita_uninstall_skill,
             openakita_list_marketplace,
             openakita_get_skill_config,
+            openakita_wecom_onboard_start,
+            openakita_wecom_onboard_poll,
             openakita_feishu_onboard_start,
             openakita_feishu_onboard_poll,
             openakita_feishu_validate,
             openakita_qqbot_onboard_start,
             openakita_qqbot_onboard_poll,
             openakita_qqbot_onboard_create,
+            openakita_qqbot_onboard_poll_and_create,
             openakita_qqbot_validate,
             fetch_pypi_versions,
             http_get_json,
@@ -5195,6 +5198,37 @@ async fn openakita_get_skill_config(
     .await
 }
 
+/// Start WeCom QR code onboarding (generate QR).
+/// Returns JSON with qr_url + qr_id.
+#[tauri::command]
+async fn openakita_wecom_onboard_start(
+    venv_dir: String,
+) -> Result<String, String> {
+    spawn_blocking_result(move || {
+        let args = vec!["wecom-onboard-start"];
+        run_python_module_json(&venv_dir, "openakita.setup_center.bridge", &args, &[])
+    })
+    .await
+}
+
+/// Poll WeCom QR code scan result.
+/// Returns JSON with bot_id + secret on success.
+#[tauri::command]
+async fn openakita_wecom_onboard_poll(
+    venv_dir: String,
+    qr_id: String,
+) -> Result<String, String> {
+    spawn_blocking_result(move || {
+        let args = vec![
+            "wecom-onboard-poll",
+            "--qr-id",
+            &qr_id,
+        ];
+        run_python_module_json(&venv_dir, "openakita.setup_center.bridge", &args, &[])
+    })
+    .await
+}
+
 /// Start Feishu Device Flow onboarding (QR scan).
 /// Returns JSON with device_code + verification_uri.
 #[tauri::command]
@@ -5288,6 +5322,24 @@ async fn openakita_qqbot_onboard_poll(
 async fn openakita_qqbot_onboard_create(venv_dir: String) -> Result<String, String> {
     spawn_blocking_result(move || {
         let args = vec!["qqbot-onboard-create"];
+        run_python_module_json(&venv_dir, "openakita.setup_center.bridge", &args, &[])
+    })
+    .await
+}
+
+/// Atomic poll + create in one process so cookies carry over.
+/// Returns JSON with status / app_id / app_secret.
+#[tauri::command]
+async fn openakita_qqbot_onboard_poll_and_create(
+    venv_dir: String,
+    session_id: String,
+) -> Result<String, String> {
+    spawn_blocking_result(move || {
+        let args = vec![
+            "qqbot-onboard-poll-and-create",
+            "--session-id",
+            &session_id,
+        ];
         run_python_module_json(&venv_dir, "openakita.setup_center.bridge", &args, &[])
     })
     .await

@@ -462,10 +462,16 @@ class Settings(BaseSettings):
 
         创建一个新的 Settings 实例（会重新读取 .env），
         然后把所有字段值拷贝回当前单例。
+
+        运行时持久化字段（``_PERSISTABLE_KEYS``）由 RuntimeState 管理，
+        不从 .env 覆盖，避免 im_bots / multi_agent_enabled 等被重置。
         """
+        _skip = set(_PERSISTABLE_KEYS)
         fresh = Settings()
         changed: list[str] = []
         for field_name in self.model_fields:
+            if field_name in _skip:
+                continue
             old_val = getattr(self, field_name)
             new_val = getattr(fresh, field_name)
             if old_val != new_val:

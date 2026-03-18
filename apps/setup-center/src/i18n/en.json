@@ -1480,12 +1480,27 @@
     "qrSubtitle": "Scan with mobile QQ to log in and create a bot",
     "qrLoading": "Creating session...",
     "qrScanHint": "Scan the QR code above with mobile QQ",
+    "qrScanNote": "After scanning, you will be redirected to the QQ Open Platform. Please create the bot there, then manually enter the AppID and AppSecret below.",
     "qrSuccess": "Bot created! Credentials filled automatically",
+    "qrPartialSuccess": "AppID obtained. Please check the QQ Open Platform for the AppSecret and enter it manually.",
     "qrRetry": "Retry",
     "qrTimeout": "QR code timed out, please retry",
     "qrInitFailed": "Initialization failed, check network",
     "qrLoginOk": "Login successful, creating bot...",
     "qrCreateFailed": "Failed to create bot",
     "qrNeedBrowser": "This API requires browser login, please create manually in browser"
+  },
+  "wecom": {
+    "qrScanConfig": "Scan QR to configure bot",
+    "qrTitle": "WeCom QR Configuration",
+    "qrSubtitle": "Scan with WeCom admin to auto-fill Bot ID and Secret",
+    "qrLoading": "Generating QR code...",
+    "qrScanHint": "Scan the QR code above with WeCom app",
+    "qrSuccess": "Configuration successful! Credentials filled automatically",
+    "qrRetry": "Retry",
+    "qrTimeout": "QR code timed out, please retry",
+    "qrExpired": "QR code expired, please retry",
+    "qrFailed": "QR configuration failed",
+    "qrInitFailed": "Initialization failed, check network"
   }
 }

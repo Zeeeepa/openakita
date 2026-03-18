@@ -68,9 +68,18 @@ class FeishuConfig:
 
     app_id: str
     app_secret: str
-    verification_token: str | None = None  # 用于 Webhook 验证
-    encrypt_key: str | None = None  # 用于消息加解密
-    log_level: str = "INFO"  # 日志级别: DEBUG, INFO, WARN, ERROR
+    verification_token: str | None = None
+    encrypt_key: str | None = None
+    log_level: str = "INFO"
+
+    def __post_init__(self) -> None:
+        if not self.app_id or not self.app_id.strip():
+            raise ValueError("FeishuConfig: app_id is required")
+        if not self.app_secret or not self.app_secret.strip():
+            raise ValueError("FeishuConfig: app_secret is required")
+        self.log_level = self.log_level.upper()
+        if self.log_level not in ("DEBUG", "INFO", "WARN", "ERROR"):
+            raise ValueError(f"FeishuConfig: invalid log_level '{self.log_level}'")
 
 
 class FeishuAdapter(ChannelAdapter):
@@ -151,6 +160,8 @@ class FeishuAdapter(ChannelAdapter):
         self._main_loop: asyncio.AbstractEventLoop | None = None
         self._ws_thread: threading.Thread | None = None
         self._ws_loop: asyncio.AbstractEventLoop | None = None
+        self._ws_watchdog_task: asyncio.Task | None = None
+        self._ws_restart_count: int = 0
         self._bot_open_id: str | None = None
         self._capabilities: list[str] = []
 
@@ -305,6 +316,67 @@ class FeishuAdapter(ChannelAdapter):
 
         # 探测可用权限/能力
         await self._probe_capabilities()
+
+        # 启动 WebSocket 看门狗（后台任务，周期性检查 WS 线程存活状态）
+        if self._ws_thread is not None:
+            self._ws_watchdog_task = asyncio.create_task(self._ws_watchdog_loop())
+
+    # ==================== WebSocket 看门狗 ====================
+
+    _WS_WATCHDOG_INTERVAL = 15          # 检查间隔（秒）
+    _WS_WATCHDOG_INITIAL_DELAY = 30     # 首次检查前等待（秒）
+    _WS_RECONNECT_MIN_INTERVAL = 10     # 最小重连间隔（秒）
+    _WS_RECONNECT_MAX_DELAY = 120       # 最大退避延迟（秒）
+
+    _WS_STABLE_THRESHOLD = 300  # 连接稳定 5 分钟后重置重连计数
+
+    async def _ws_watchdog_loop(self) -> None:
+        """周期性检查 WebSocket 线程是否存活，退出后自动重启。"""
+        await asyncio.sleep(self._WS_WATCHDOG_INITIAL_DELAY)
+        last_restart_time = 0.0
+        stable_since = asyncio.get_running_loop().time()
+
+        while self._running:
+            await asyncio.sleep(self._WS_WATCHDOG_INTERVAL)
+            if not self._running:
+                break
+
+            ws_thread = self._ws_thread
+            if ws_thread is not None and ws_thread.is_alive():
+                now = asyncio.get_running_loop().time()
+                if self._ws_restart_count > 0 and (now - stable_since) >= self._WS_STABLE_THRESHOLD:
+                    logger.info("Feishu WS watchdog: connection stable, resetting restart count")
+                    self._ws_restart_count = 0
+                continue
+
+            # WS 线程已退出，计算退避延迟后重启
+            now = asyncio.get_running_loop().time()
+            since_last = now - last_restart_time
+            if since_last < self._WS_RECONNECT_MIN_INTERVAL:
+                continue
+
+            self._ws_restart_count += 1
+            backoff = min(
+                self._WS_RECONNECT_MIN_INTERVAL * (2 ** min(self._ws_restart_count - 1, 6)),
+                self._WS_RECONNECT_MAX_DELAY,
+            )
+            logger.warning(
+                f"Feishu WS watchdog: thread exited (restart #{self._ws_restart_count}), "
+                f"reconnecting in {backoff:.0f}s"
+            )
+            await asyncio.sleep(backoff)
+            if not self._running:
+                break
+
+            try:
+                self.start_websocket(blocking=False)
+                last_restart_time = asyncio.get_running_loop().time()
+                stable_since = last_restart_time
+                logger.info(
+                    f"Feishu WS watchdog: reconnected (restart #{self._ws_restart_count})"
+                )
+            except Exception as e:
+                logger.error(f"Feishu WS watchdog: reconnect failed: {e}")
 
     async def _probe_capabilities(self) -> None:
         """探测飞书适配器已实现方法对应的权限是否可用
@@ -783,7 +855,7 @@ class FeishuAdapter(ChannelAdapter):
                 )
             if response.success():
                 logger.debug(f"Feishu: thinking card sent to {chat_id}")
-                return response.data.message_id
+                return response.data.message_id if response.data else ""
             logger.debug(f"Feishu: thinking card failed: {response.msg}")
         except Exception as e:
             logger.debug(f"Feishu: _send_thinking_card error: {e}")
@@ -1094,6 +1166,11 @@ class FeishuAdapter(ChannelAdapter):
         """
         self._running = False
 
+        # 0) 取消看门狗任务
+        if self._ws_watchdog_task is not None:
+            self._ws_watchdog_task.cancel()
+            self._ws_watchdog_task = None
+
         # 1) 停止 WS 线程的事件循环 → SDK 的 ws_client.start() 会退出阻塞
         ws_loop = self._ws_loop
         if ws_loop is not None:
@@ -1197,7 +1274,14 @@ class FeishuAdapter(ChannelAdapter):
         content = MessageContent()
 
         msg_type = message.get("message_type")
-        msg_content = json.loads(message.get("content", "{}"))
+        raw_content = message.get("content", "{}")
+        if isinstance(raw_content, dict):
+            msg_content = raw_content
+        else:
+            try:
+                msg_content = json.loads(raw_content) if raw_content else {}
+            except (json.JSONDecodeError, TypeError):
+                msg_content = {}
 
         if msg_type == "text":
             content.text = msg_content.get("text", "")
@@ -1632,7 +1716,7 @@ class FeishuAdapter(ChannelAdapter):
                         await self.send_image(message.chat_id, extra_img.local_path, reply_to=reply_target)
                     except Exception as e:
                         logger.warning(f"Feishu: send extra image failed: {e}")
-            return response.data.message_id
+            return response.data.message_id if response.data else ""
 
         # 普通发送（在线程池中执行同步调用）
         request = (
@@ -1665,7 +1749,7 @@ class FeishuAdapter(ChannelAdapter):
                 except Exception as e:
                     logger.warning(f"Feishu: send extra image failed: {e}")
 
-        return response.data.message_id
+        return response.data.message_id if response.data else ""
 
     # ==================== IM 查询工具方法 ====================
 
@@ -1832,7 +1916,7 @@ class FeishuAdapter(ChannelAdapter):
                 )
 
             if response.success():
-                return response.data.image_key
+                return response.data.image_key if response.data else ""
 
             if attempt == 0 and self._is_token_error(response):
                 logger.warning(
@@ -1887,7 +1971,8 @@ class FeishuAdapter(ChannelAdapter):
             raise RuntimeError(f"Download succeeded but response.file is empty for {media.file_id}")
 
         # 保存文件
-        local_path = self.media_dir / media.filename
+        safe_name = Path(media.filename).name or "download"
+        local_path = self.media_dir / safe_name
         with open(local_path, "wb") as f:
             f.write(response.file.read())
 
@@ -1968,7 +2053,7 @@ class FeishuAdapter(ChannelAdapter):
         if not response.success():
             raise RuntimeError(f"Failed to send card: {response.msg}")
 
-        return response.data.message_id
+        return response.data.message_id if response.data else ""
 
     async def reply_message(self, message_id: str, text: str, msg_type: str = "text") -> str:
         """
@@ -2006,7 +2091,7 @@ class FeishuAdapter(ChannelAdapter):
         if not response.success():
             raise RuntimeError(f"Failed to reply message: {response.msg}")
 
-        return response.data.message_id
+        return response.data.message_id if response.data else ""
 
     async def send_photo(
         self, chat_id: str, photo_path: str, caption: str | None = None,
@@ -2065,7 +2150,7 @@ class FeishuAdapter(ChannelAdapter):
         if not response.success():
             raise RuntimeError(f"Failed to send photo: {response.msg}")
 
-        message_id = response.data.message_id
+        message_id = response.data.message_id if response.data else ""
 
         if caption:
             await self._send_text(chat_id, caption, reply_to=reply_to)
@@ -2130,7 +2215,7 @@ class FeishuAdapter(ChannelAdapter):
         if not response.success():
             raise RuntimeError(f"Failed to send file: {response.msg}")
 
-        message_id = response.data.message_id
+        message_id = response.data.message_id if response.data else ""
 
         if caption:
             await self._send_text(chat_id, caption, reply_to=reply_to)
@@ -2195,7 +2280,7 @@ class FeishuAdapter(ChannelAdapter):
         if not response.success():
             raise RuntimeError(f"Failed to send voice: {response.msg}")
 
-        message_id = response.data.message_id
+        message_id = response.data.message_id if response.data else ""
 
         if caption:
             await self._send_text(chat_id, caption, reply_to=reply_to)
@@ -2244,7 +2329,7 @@ class FeishuAdapter(ChannelAdapter):
         if not response.success():
             raise RuntimeError(f"Failed to send text: {response.msg}")
 
-        return response.data.message_id
+        return response.data.message_id if response.data else ""
 
     async def _upload_file(self, path: str) -> str:
         """上传文件到飞书（含 token 过期自动重试）"""
@@ -2268,7 +2353,7 @@ class FeishuAdapter(ChannelAdapter):
                 )
 
             if response.success():
-                return response.data.file_key
+                return response.data.file_key if response.data else ""
 
             if attempt == 0 and self._is_token_error(response):
                 logger.warning(

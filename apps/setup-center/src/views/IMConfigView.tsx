@@ -3,7 +3,9 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FieldText, FieldBool, TelegramPairingCodeHint } from "../components/EnvFields";
 import { FeishuQRModal } from "../components/FeishuQRModal";
-import { IconBook, IconClipboard, LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ } from "../icons";
+import { QQBotQRModal } from "../components/QQBotQRModal";
+import { WecomQRModal } from "../components/WecomQRModal";
+import { IconBook, IconClipboard, LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ, LogoOneBot } from "../icons";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { EnvMap } from "../types";
 import { envGet, envSet } from "../utils";
@@ -23,6 +25,8 @@ export function IMConfigView(props: IMConfigViewProps) {
   const { envDraft, setEnvDraft, busy = null, currentWorkspaceId, venvDir = "", imDisabled = false, onToggleIM } = props;
   const { t } = useTranslation();
   const [showFeishuQR, setShowFeishuQR] = useState(false);
+  const [showWecomQR, setShowWecomQR] = useState(false);
+  const [showQQBotQR, setShowQQBotQR] = useState(false);
 
   const _envBase = { envDraft, onEnvChange: setEnvDraft, busy };
   const FT = (p: { k: string; label: string; placeholder?: string; help?: string; type?: "text" | "password" }) =>
@@ -44,7 +48,7 @@ export function IMConfigView(props: IMConfigViewProps) {
           {FT({ k: "TELEGRAM_PROXY", label: t("config.imProxy"), placeholder: "http://127.0.0.1:7890" })}
           {FB({ k: "TELEGRAM_REQUIRE_PAIRING", label: t("config.imPairing") })}
           {FT({ k: "TELEGRAM_PAIRING_CODE", label: t("config.imPairingCode"), placeholder: t("config.imPairingCodeHint") })}
-          <TelegramPairingCodeHint currentWorkspaceId={currentWorkspaceId} />
+          <TelegramPairingCodeHint currentWorkspaceId={currentWorkspaceId} envDraft={envDraft} onEnvChange={setEnvDraft} />
           {FT({ k: "TELEGRAM_WEBHOOK_URL", label: "Webhook URL", placeholder: "https://..." })}
         </>
       ),
@@ -122,6 +126,11 @@ export function IMConfigView(props: IMConfigViewProps) {
             </div>
             {isWs ? (
               <>
+                {venvDir && (
+                  <button className="btnSmall" style={{ marginBottom: 8 }}
+                    onClick={() => setShowWecomQR(true)}
+                  >{t("wecom.qrScanConfig")}</button>
+                )}
                 {FT({ k: "WEWORK_WS_BOT_ID", label: t("config.imWeworkBotId"), help: t("config.imWeworkBotIdHelp") })}
                 {FT({ k: "WEWORK_WS_SECRET", label: t("config.imWeworkSecret"), type: "password", help: t("config.imWeworkSecretHelp") })}
               </>
@@ -163,6 +172,11 @@ export function IMConfigView(props: IMConfigViewProps) {
       needPublicIp: false,
       body: (
         <>
+          {venvDir && (
+            <button className="btnSmall" style={{ marginBottom: 8 }}
+              onClick={() => setShowQQBotQR(true)}
+            >{t("qqbot.qrScanCreate")}</button>
+          )}
           {FT({ k: "QQBOT_APP_ID", label: "AppID", placeholder: "q.qq.com 开发设置" })}
           {FT({ k: "QQBOT_APP_SECRET", label: "AppSecret", type: "password", placeholder: "q.qq.com 开发设置" })}
           {FB({ k: "QQBOT_SANDBOX", label: t("config.imQQBotSandbox") })}
@@ -193,7 +207,7 @@ export function IMConfigView(props: IMConfigViewProps) {
       return {
         title: "OneBot",
         appType: isReverse ? t("config.imTypeOneBotReverse") : t("config.imTypeOneBotForward"),
-        logo: <LogoQQ size={22} />,
+        logo: <LogoOneBot size={22} />,
         enabledKey: "ONEBOT_ENABLED",
         docUrl: "https://github.com/botuniverse/onebot-11",
         needPublicIp: false,
@@ -234,6 +248,28 @@ export function IMConfigView(props: IMConfigViewProps) {
             setEnvDraft((d) => envSet(envSet(d, "FEISHU_APP_ID", appId), "FEISHU_APP_SECRET", appSecret));
             setShowFeishuQR(false);
             toast.success(t("feishu.qrSuccess"));
+          }}
+        />
+      )}
+      {showWecomQR && (
+        <WecomQRModal
+          venvDir={venvDir}
+          onClose={() => setShowWecomQR(false)}
+          onSuccess={(botId, secret) => {
+            setEnvDraft((d) => envSet(envSet(d, "WEWORK_WS_BOT_ID", botId), "WEWORK_WS_SECRET", secret));
+            setShowWecomQR(false);
+            toast.success(t("wecom.qrSuccess"));
+          }}
+        />
+      )}
+      {showQQBotQR && (
+        <QQBotQRModal
+          venvDir={venvDir}
+          onClose={() => setShowQQBotQR(false)}
+          onSuccess={(appId, appSecret) => {
+            setEnvDraft((d) => envSet(envSet(d, "QQBOT_APP_ID", appId), "QQBOT_APP_SECRET", appSecret));
+            setShowQQBotQR(false);
+            toast.success(t("qqbot.qrSuccess"));
           }}
         />
       )}

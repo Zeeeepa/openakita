@@ -31,7 +31,7 @@ import {
   IconChevronDown, IconChevronRight, IconChevronUp, IconGlobe,
   IconEdit, IconTrash, IconEye, IconEyeOff, IconInfo, IconClipboard, IconPower, IconCircle,
   DotGreen, DotGray, DotYellow, DotRed,
-  LogoTelegram, LogoFeishu, LogoWework, LogoDingtalk, LogoQQ,
+  IM_LOGO_MAP,
 } from "./icons";
 import { ChevronDownIcon, ChevronRight, XIcon, Loader2, RefreshCw, Play, Square, RotateCcw, Power, PowerOff, FolderOpen, Activity, ArrowRight, Server, Download, Zap, Inbox, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -1120,7 +1120,7 @@ export function App() {
     for (const [dk, dv] of Object.entries(defaults)) {
       if (!(dk in parsed)) parsed[dk] = dv;
     }
-    setEnvDraft(parsed);
+    setEnvDraft((prev) => ({ ...prev, ...parsed }));
     envLoadedForWs.current = workspaceId;
     return parsed;
   }
@@ -3246,13 +3246,16 @@ export function App() {
       if (useHttpApi) {
         // ── Try HTTP API, fall back to Tauri on failure ──
         let endpointSummaryResolved = false;
+        let envAlreadyLoaded = false;
+        let httpEnv: EnvMap = {};
         try {
           // Try new config API (may not exist in older service versions)
           const envRes = await safeFetch(`${effectiveApiBaseUrl}/api/config/env`);
           const envData = await envRes.json();
-          const env = envData.env || {};
-          setEnvDraft((prev) => ({ ...prev, ...env }));
-          envLoadedForWs.current = "__remote__";
+          httpEnv = envData.env || {};
+          setEnvDraft((prev) => ({ ...prev, ...httpEnv }));
+          envLoadedForWs.current = currentWorkspaceId || "__remote__";
+          envAlreadyLoaded = true;
 
           const epRes = await safeFetch(`${effectiveApiBaseUrl}/api/config/endpoints`);
           const epData = await epRes.json();
@@ -3260,7 +3263,7 @@ export function App() {
           const list = eps
             .map((e: any) => {
               const keyEnv = String(e?.api_key_env || "");
-              const keyPresent = !!(keyEnv && (env[keyEnv] ?? "").trim());
+              const keyPresent = !!(keyEnv && (httpEnv[keyEnv] ?? "").trim());
               return {
                 name: String(e?.name || ""),
                 provider: String(e?.provider || ""),
@@ -3315,7 +3318,7 @@ export function App() {
         // Fall back to Tauri local file system if HTTP API completely failed
         if (!endpointSummaryResolved && currentWorkspaceId) {
           try {
-            const env = await ensureEnvLoaded(currentWorkspaceId);
+            const env = envAlreadyLoaded ? httpEnv : await ensureEnvLoaded(currentWorkspaceId);
             const raw = await readWorkspaceFile("data/llm_endpoints.json");
             const parsed = JSON.parse(raw);
             const eps = Array.isArray(parsed?.endpoints) ? parsed.endpoints : [];
@@ -4294,12 +4297,13 @@ export function App() {
               const channelId = c.k.replace("_ENABLED", "").toLowerCase();
               const ih = imHealth[channelId];
               const isOnline = ih && (ih.status === "healthy" || ih.status === "online");
-              // If imHealth has data for this channel, trust it over envDraft (handles remote mode)
               const effectiveEnabled = ih ? true : c.enabled;
               const dot = !effectiveEnabled ? "disabled" : ih ? (isOnline ? "healthy" : "unhealthy") : c.ok ? "unknown" : "degraded";
+              const LogoComp = IM_LOGO_MAP[channelId];
               return (
                 <div key={c.k} className="imStatusRow">
                   <span className={"healthDot " + dot} />
+                  {LogoComp && <span style={{ display: "inline-flex", flexShrink: 0 }}>{LogoComp({ size: 16 })}</span>}
                   <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{c.name}</span>
                   <span className="imStatusLabel">{!effectiveEnabled ? t("status.disabled") : ih ? (isOnline ? t("status.online") : t("status.offline")) : c.ok ? t("status.configured") : t("status.keyMissing")}</span>
                 </div>
@@ -6476,7 +6480,7 @@ export function App() {
                     {FT({ k: "TELEGRAM_PROXY", label: "代理（可选）", placeholder: "http://127.0.0.1:7890 / socks5://..." })}
                     {FB({ k: "TELEGRAM_REQUIRE_PAIRING", label: t("config.imPairing") })}
                     {FT({ k: "TELEGRAM_PAIRING_CODE", label: t("config.imPairingCode"), placeholder: t("config.imPairingCodeHint") })}
-                    <TelegramPairingCodeHint currentWorkspaceId={currentWorkspaceId} />
+                    <TelegramPairingCodeHint currentWorkspaceId={currentWorkspaceId} envDraft={envDraft} onEnvChange={setEnvDraft} />
                     {FT({ k: "TELEGRAM_WEBHOOK_URL", label: "Webhook URL", placeholder: "https://..." })}
                   </>
                 ),
@@ -6825,7 +6829,7 @@ export function App() {
               {t("config.applyRestart")}
             </button>
           </div>
-          
+
         </div>
       </>
     );
@@ -6898,7 +6902,7 @@ export function App() {
     try {
       const modules = await invoke<ModuleInfo[]>("detect_modules");
       setObModules(modules);
-      
+
     } catch (e) {
       logger.warn("App", "detect_modules failed", { error: String(e) });
     }
@@ -6914,7 +6918,7 @@ export function App() {
     }
   }
 
-  
+
 
   const [obHasErrors, setObHasErrors] = useState(false);
 
@@ -6976,7 +6980,7 @@ export function App() {
       { id: "llm-config", label: "保存 LLM 配置", status: savedEndpoints.length > 0 ? "pending" : "skipped" },
       { id: "env-save", label: "保存环境变量", status: "pending" },
     ];
-    
+
     taskDefs.push({ id: "backend-check", label: "检查后端环境", status: "pending" });
     // CLI 注册
     const cliCommands: string[] = [];

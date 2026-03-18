@@ -68,6 +68,12 @@ class DingTalkConfig:
     app_secret: str
     agent_id: str | None = None
 
+    def __post_init__(self) -> None:
+        if not self.app_key or not self.app_key.strip():
+            raise ValueError("DingTalkConfig: app_key is required")
+        if not self.app_secret or not self.app_secret.strip():
+            raise ValueError("DingTalkConfig: app_secret is required")
+
 
 class DingTalkAdapter(ChannelAdapter):
     """
@@ -141,6 +147,8 @@ class DingTalkAdapter(ChannelAdapter):
         # 新版 access_token (api.dingtalk.com/v1.0 接口用)
         self._access_token: str | None = None
         self._token_expires_at: float = 0
+        self._token_lock: asyncio.Lock = asyncio.Lock()
+        self._old_token_lock: asyncio.Lock = asyncio.Lock()
         self._http_client: Any | None = None
 
         # Stream 模式
@@ -148,6 +156,8 @@ class DingTalkAdapter(ChannelAdapter):
         self._stream_thread: threading.Thread | None = None
         self._stream_loop: asyncio.AbstractEventLoop | None = None
         self._main_loop: asyncio.AbstractEventLoop | None = None
+        self._stream_watchdog_task: asyncio.Task | None = None
+        self._stream_restart_count: int = 0
 
         # 缓存每个会话的 session webhook、发送者 userId、会话类型
         self._session_webhooks: dict[str, str] = {}
@@ -184,7 +194,7 @@ class DingTalkAdapter(ChannelAdapter):
     ) -> None:
         """逐 token 流式更新互动卡片内容。"""
         sk = self._make_session_key(chat_id, thread_id)
-        card_biz_id = self._thinking_cards.get(chat_id)
+        card_biz_id = self._thinking_cards.get(sk)
         if not card_biz_id:
             return
 
@@ -212,7 +222,7 @@ class DingTalkAdapter(ChannelAdapter):
     ) -> bool:
         """完成流式输出，用最终文本更新卡片。"""
         sk = self._make_session_key(chat_id, thread_id)
-        card_biz_id = self._thinking_cards.pop(chat_id, None)
+        card_biz_id = self._thinking_cards.pop(sk, None)
 
         self._streaming_buffers.pop(sk, None)
         self._streaming_last_patch.pop(sk, None)
@@ -256,6 +266,13 @@ class DingTalkAdapter(ChannelAdapter):
         发到旧连接上的消息因 _main_loop 已失效而被静默丢弃（与飞书同源 Bug）。
         """
         self._running = False
+
+        # 0) 取消看门狗
+        if self._stream_watchdog_task and not self._stream_watchdog_task.done():
+            self._stream_watchdog_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._stream_watchdog_task
+            self._stream_watchdog_task = None
 
         # 1) 停止 Stream 线程的事件循环
         stream_loop = self._stream_loop
@@ -335,6 +352,65 @@ class DingTalkAdapter(ChannelAdapter):
         )
         self._stream_thread.start()
         logger.info("DingTalk Stream client started in background thread")
+
+        # 启动 Stream 看门狗
+        if self._stream_watchdog_task is None or self._stream_watchdog_task.done():
+            self._stream_watchdog_task = asyncio.create_task(self._stream_watchdog_loop())
+
+    # ==================== Stream 看门狗 ====================
+
+    _STREAM_WATCHDOG_INTERVAL = 15
+    _STREAM_WATCHDOG_INITIAL_DELAY = 30
+    _STREAM_RECONNECT_MIN_INTERVAL = 10
+    _STREAM_RECONNECT_MAX_DELAY = 120
+    _STREAM_STABLE_THRESHOLD = 300
+
+    async def _stream_watchdog_loop(self) -> None:
+        """周期性检查 Stream 线程是否存活，退出后自动重启。"""
+        await asyncio.sleep(self._STREAM_WATCHDOG_INITIAL_DELAY)
+        last_restart_time = 0.0
+        stable_since = asyncio.get_running_loop().time()
+
+        while self._running:
+            await asyncio.sleep(self._STREAM_WATCHDOG_INTERVAL)
+            if not self._running:
+                break
+
+            st = self._stream_thread
+            if st is not None and st.is_alive():
+                now = asyncio.get_running_loop().time()
+                if self._stream_restart_count > 0 and (now - stable_since) >= self._STREAM_STABLE_THRESHOLD:
+                    logger.info("DingTalk Stream watchdog: connection stable, resetting restart count")
+                    self._stream_restart_count = 0
+                continue
+
+            now = asyncio.get_running_loop().time()
+            since_last = now - last_restart_time
+            if since_last < self._STREAM_RECONNECT_MIN_INTERVAL:
+                continue
+
+            self._stream_restart_count += 1
+            backoff = min(
+                self._STREAM_RECONNECT_MIN_INTERVAL * (2 ** min(self._stream_restart_count - 1, 6)),
+                self._STREAM_RECONNECT_MAX_DELAY,
+            )
+            logger.warning(
+                f"DingTalk Stream watchdog: thread exited (restart #{self._stream_restart_count}), "
+                f"reconnecting in {backoff:.0f}s"
+            )
+            await asyncio.sleep(backoff)
+            if not self._running:
+                break
+
+            try:
+                self._start_stream()
+                last_restart_time = asyncio.get_running_loop().time()
+                stable_since = last_restart_time
+                logger.info(
+                    f"DingTalk Stream watchdog: reconnected (restart #{self._stream_restart_count})"
+                )
+            except Exception as e:
+                logger.error(f"DingTalk Stream watchdog: reconnect failed: {e}")
 
     async def _handle_stream_message(
         self, callback: "dingtalk_stream.CallbackMessage"
@@ -519,6 +595,9 @@ class DingTalkAdapter(ChannelAdapter):
                         file_id=code,
                     )
                     images.append(media)
+                # 将 @提及 保留为文本，方便 LLM 理解上下文
+                if section.get("type") == "at" and section.get("userId"):
+                    text_parts.append(f"@{section['userId']}")
 
             return MessageContent(
                 text="\n".join(text_parts) if text_parts else None,
@@ -535,6 +614,7 @@ class DingTalkAdapter(ChannelAdapter):
                     audio_content = {}
             download_code = audio_content.get("downloadCode", "")
             duration = audio_content.get("duration", 0)
+            recognition = audio_content.get("recognition", "")
 
             media = MediaFile.create(
                 filename=f"dingtalk_voice_{download_code[:8]}.ogg",
@@ -542,7 +622,11 @@ class DingTalkAdapter(ChannelAdapter):
                 file_id=download_code,
             )
             media.duration = float(duration) / 1000.0 if duration else None
-            return MessageContent(voices=[media])
+            if recognition:
+                media.transcription = recognition.strip()
+
+            text = recognition.strip() if recognition else None
+            return MessageContent(text=text, voices=[media])
 
         elif msg_type == "video":
             # 视频消息 - SDK 不解析
@@ -608,14 +692,15 @@ class DingTalkAdapter(ChannelAdapter):
 
         Gateway 的 _keep_typing 每 4 秒调用一次，仅第一次生成卡片。
         """
-        if chat_id in self._thinking_cards:
+        sk = self._make_session_key(chat_id, thread_id)
+        if sk in self._thinking_cards:
             return
         card_biz_id = f"thinking_{uuid.uuid4().hex[:16]}"
-        self._thinking_cards[chat_id] = card_biz_id
+        self._thinking_cards[sk] = card_biz_id
         try:
             await self._send_interactive_card(chat_id, card_biz_id, "💭 **正在思考中...**")
         except Exception as e:
-            self._thinking_cards.pop(chat_id, None)
+            self._thinking_cards.pop(sk, None)
             logger.debug(f"DingTalk: send_typing card failed: {e}")
 
     async def clear_typing(self, chat_id: str, thread_id: str | None = None) -> None:
@@ -624,7 +709,8 @@ class DingTalkAdapter(ChannelAdapter):
         正常路径下 send_message 已经消费了卡片，此方法不会做任何事。
         仅在异常路径（Agent + _send_error 双重失败、或 typing 重建后未被消费）时触发。
         """
-        card_biz_id = self._thinking_cards.pop(chat_id, None)
+        sk = self._make_session_key(chat_id, thread_id)
+        card_biz_id = self._thinking_cards.pop(sk, None)
         if not card_biz_id:
             return
         try:
@@ -710,7 +796,7 @@ class DingTalkAdapter(ChannelAdapter):
         if sk in self._streaming_buffers:
             card_biz_id = None
         else:
-            card_biz_id = self._thinking_cards.pop(message.chat_id, None)
+            card_biz_id = self._thinking_cards.pop(sk, None)
         if card_biz_id:
             text = message.content.text or ""
             if text and not message.content.has_media:
@@ -809,7 +895,7 @@ class DingTalkAdapter(ChannelAdapter):
             raise
 
         # OpenAPI _build_msg_key_param 只处理首条媒体，补发剩余图片/文件
-        for extra_img in message.content.images[1:]:
+        for extra_img in (message.content.images or [])[1:]:
             if extra_img.local_path:
                 try:
                     await self.send_image(message.chat_id, extra_img.local_path)
@@ -1340,16 +1426,18 @@ class DingTalkAdapter(ChannelAdapter):
             )
 
         # 下载文件
-        response = await self._http_client.get(download_url)
+        response = await self._http_client.get(download_url, timeout=60.0)
+        response.raise_for_status()
 
-        local_path = self.media_dir / media.filename
+        safe_name = Path(media.filename).name or "download"
+        local_path = self.media_dir / safe_name
         with open(local_path, "wb") as f:
             f.write(response.content)
 
         media.local_path = str(local_path)
         media.status = MediaStatus.READY
 
-        logger.info(f"Downloaded media: {media.filename}")
+        logger.info(f"Downloaded media: {safe_name}")
         return local_path
 
     async def upload_media(self, path: Path, mime_type: str) -> MediaFile:
@@ -1424,57 +1512,79 @@ class DingTalkAdapter(ChannelAdapter):
         新版 API (robot/groupMessages/send, robot/oToMessages/batchSend 等)
         需要通过 OAuth2 接口获取的 accessToken，
         放在请求头 x-acs-dingtalk-access-token 中。
+
+        使用 asyncio.Lock 进行 double-check locking，避免并发重复刷新。
         """
         if self._access_token and time.time() < self._token_expires_at:
             return self._access_token
 
-        _import_httpx()
+        async with self._token_lock:
+            if self._access_token and time.time() < self._token_expires_at:
+                return self._access_token
 
-        url = f"{self.API_NEW}/oauth2/accessToken"
-        body = {
-            "appKey": self.config.app_key,
-            "appSecret": self.config.app_secret,
-        }
+            _import_httpx()
+            from ..retry import async_with_retry
 
-        response = await self._http_client.post(url, json=body)
-        data = response.json()
+            async def _do_refresh() -> dict:
+                url = f"{self.API_NEW}/oauth2/accessToken"
+                body = {
+                    "appKey": self.config.app_key,
+                    "appSecret": self.config.app_secret,
+                }
+                response = await self._http_client.post(url, json=body, timeout=10.0)
+                data = response.json()
+                if "accessToken" not in data:
+                    raise RuntimeError(
+                        f"Failed to get new access token: {data.get('message', data)}"
+                    )
+                return data
 
-        if "accessToken" not in data:
-            raise RuntimeError(
-                f"Failed to get new access token: {data.get('message', data)}"
+            data = await async_with_retry(
+                _do_refresh, max_retries=2, base_delay=1.0,
+                operation_name="DingTalk._refresh_token",
             )
+            self._access_token = data["accessToken"]
+            self._token_expires_at = time.time() + data.get("expireIn", 7200) - 300
+            logger.info("Refreshed new-style access token (OAuth2)")
 
-        self._access_token = data["accessToken"]
-        self._token_expires_at = time.time() + data.get("expireIn", 7200) - 60
-        logger.info("Refreshed new-style access token (OAuth2)")
-
-        return self._access_token
+            return self._access_token
 
     async def _refresh_old_token(self) -> str:
         """
         刷新旧版 access token (用于 oapi.dingtalk.com 接口)
 
         旧版 API (media/upload, gettoken 等) 使用 access_token 查询参数。
+
+        使用 asyncio.Lock 进行 double-check locking，避免并发重复刷新。
         """
         if self._old_access_token and time.time() < self._old_token_expires_at:
             return self._old_access_token
 
-        _import_httpx()
+        async with self._old_token_lock:
+            if self._old_access_token and time.time() < self._old_token_expires_at:
+                return self._old_access_token
 
-        url = f"{self.API_BASE}/gettoken"
-        params = {
-            "appkey": self.config.app_key,
-            "appsecret": self.config.app_secret,
-        }
+            _import_httpx()
+            from ..retry import async_with_retry
 
-        response = await self._http_client.get(url, params=params)
-        data = response.json()
+            async def _do_refresh() -> dict:
+                url = f"{self.API_BASE}/gettoken"
+                params = {
+                    "appkey": self.config.app_key,
+                    "appsecret": self.config.app_secret,
+                }
+                response = await self._http_client.get(url, params=params, timeout=10.0)
+                data = response.json()
+                if data.get("errcode", 0) != 0:
+                    raise RuntimeError(f"Failed to get old access token: {data.get('errmsg')}")
+                return data
 
-        if data.get("errcode", 0) != 0:
-            raise RuntimeError(f"Failed to get old access token: {data.get('errmsg')}")
+            data = await async_with_retry(
+                _do_refresh, max_retries=2, base_delay=1.0,
+                operation_name="DingTalk._refresh_old_token",
+            )
+            self._old_access_token = data["access_token"]
+            self._old_token_expires_at = time.time() + data["expires_in"] - 300
+            logger.info("Refreshed old-style access token (gettoken)")
 
-        self._old_access_token = data["access_token"]
-        self._old_token_expires_at = time.time() + data["expires_in"] - 60
-        logger.info("Refreshed old-style access token (gettoken)")
-
-        return self._old_access_token
+            return self._old_access_token

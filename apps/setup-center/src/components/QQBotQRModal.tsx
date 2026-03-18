@@ -12,6 +12,7 @@ type OnboardState =
   | "login_ok"
   | "creating"
   | "success"
+  | "partial"
   | "error";
 
 interface QQBotQRModalProps {
@@ -61,21 +62,23 @@ async function onboardPoll(
   return res.json();
 }
 
-async function onboardCreate(
+async function onboardPollAndCreate(
   venvDir: string,
+  sessionId: string,
   apiBaseUrl?: string,
 ): Promise<Record<string, any>> {
   if (IS_TAURI) {
-    const raw = await invoke<string>("openakita_qqbot_onboard_create", {
-      venvDir,
-    });
+    const raw = await invoke<string>(
+      "openakita_qqbot_onboard_poll_and_create",
+      { venvDir, sessionId },
+    );
     return JSON.parse(raw);
   }
   const base = apiBaseUrl || "";
-  const res = await safeFetch(`${base}/api/qqbot/onboard/create`, {
+  const res = await safeFetch(`${base}/api/qqbot/onboard/poll-and-create`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
+    body: JSON.stringify({ session_id: sessionId }),
   });
   return res.json();
 }
@@ -145,21 +148,25 @@ export function QQBotQRModal({
 
           if (data.status === "ok" && data.developer_id) {
             if (pollRef.current) clearInterval(pollRef.current);
-            setState("login_ok");
+            setState("creating");
 
-            // login succeeded — now create the bot
+            // login succeeded — use atomic poll+create to preserve cookies
             try {
-              setState("creating");
-              const bot = await onboardCreate(venvDir, apiBaseUrl);
+              const bot = await onboardPollAndCreate(
+                venvDir,
+                sid,
+                apiBaseUrl,
+              );
               if (!mountedRef.current) return;
 
               if (bot.app_id && bot.app_secret) {
                 setState("success");
                 onSuccess(bot.app_id, bot.app_secret);
+              } else if (bot.app_id && bot.needs_secret) {
+                onSuccess(bot.app_id, "");
+                setState("partial");
               } else {
-                setError(
-                  bot.error || t("qqbot.qrCreateFailed"),
-                );
+                setError(bot.error || t("qqbot.qrCreateFailed"));
                 setState("error");
               }
             } catch (createErr: unknown) {
@@ -263,10 +270,24 @@ export function QQBotQRModal({
               style={{
                 fontSize: 12,
                 color: "var(--text3)",
-                marginBottom: 8,
+                marginBottom: 6,
               }}
             >
               {t("qqbot.qrScanHint")}
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--warning, #d97706)",
+                lineHeight: 1.5,
+                padding: "8px 12px",
+                background: "var(--warning-bg, rgba(217,119,6,0.08))",
+                borderRadius: 6,
+                marginBottom: 8,
+                textAlign: "left",
+              }}
+            >
+              {t("qqbot.qrScanNote")}
             </div>
             <div
               style={{
@@ -311,6 +332,16 @@ export function QQBotQRModal({
           >
             <div style={{ fontSize: 32, marginBottom: 8 }}>✓</div>
             <div style={{ fontSize: 14 }}>{t("qqbot.qrSuccess")}</div>
+          </div>
+        )}
+
+        {state === "partial" && (
+          <div style={{ textAlign: "center", padding: 20 }}>
+            <div style={{ fontSize: 28, marginBottom: 8, color: "var(--warning, #d97706)" }}>!</div>
+            <div style={{ fontSize: 13, color: "var(--text2)", marginBottom: 12, lineHeight: 1.5 }}>
+              {t("qqbot.qrPartialSuccess")}
+            </div>
+            <button className="btnSmall" onClick={onClose}>OK</button>
           </div>
         )}
 

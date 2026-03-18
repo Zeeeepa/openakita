@@ -15,21 +15,22 @@
 | 认证 | `_send_auth()` | 连接后立即发认证帧 (`aibot_subscribe`) |
 | 心跳保活 | `_heartbeat_loop()` | 30s 间隔，连续 2 次无回复判定连接死亡 |
 | 指数退避重连 | `_connection_loop()` | 1s → 2s → 4s → ... → 30s (cap)，默认无限重连 |
-| 消息类型解析 | `_parse_content()` | 支持 text/image/mixed/voice/file |
-| 事件类型解析 | `_handle_event_callback()` | enter_chat/template_card_event/feedback_event |
-| 消息去重 | `_seen_msg_ids` (OrderedDict) | 按 `msgid` 去重，上限 500 |
+| 消息类型解析 | `_parse_content()` | 支持 text/image/mixed/voice/file/video |
+| 事件类型解析 | `_handle_event_callback()` | enter_chat/template_card_event/feedback_event/disconnected_event |
+| 消息去重 | `_seen_msg_ids` (OrderedDict) | 按 `msgid` 去重，10 分钟 TTL + 数量上限 500 双重淘汰 |
 
 ### 2. 消息发送
 
 | 功能 | 方法 | 说明 |
 |------|------|------|
 | 流式文本回复 | `_send_stream_reply()` | `msgtype: "stream"`，透传 `req_id`，自动分片 (20480B) |
-| 图片回复 | `_prepare_image_items()` | base64 编码，仅在 `finish=true` 时附加，最多 10 张 |
-| 主动推送 (Markdown) | `_send_active_message()` | `cmd: "aibot_send_msg"`，自己生成 `req_id` |
+| 图片/文件/语音/视频回复 | `send_image/file/voice/video()` | WS 上传获取 media_id → 流式结束后追加发送 |
+| 主动推送 (Markdown) | `_send_active_message()` | `cmd: "aibot_send_msg"`，自己生成 `req_id`，支持 `chat_type` |
+| 主动推送 (媒体) | `_send_active_media_message()` | 支持 image/file/voice/video（需先 upload 获取 media_id） |
 | response_url 回退 | `_response_url_fallback()` | WS 回复失败时通过 HTTP POST 回退 |
-| Webhook 图片发送 | `_WebhookSender.send_image()` | base64+md5 直发，需配置 `wework_ws_webhook_url` |
-| Webhook 语音发送 | `_WebhookSender.send_voice()` | 非 AMR 先转 AMR → upload_media → 发送 |
-| Webhook 文件发送 | `_WebhookSender.send_file()` | upload_media → 发送 |
+| Webhook 图片发送 | `_WebhookSender.send_image()` | base64+md5 直发 (fallback) |
+| Webhook 语音发送 | `_WebhookSender.send_voice()` | 非 AMR 先转 AMR → upload_media → 发送 (fallback) |
+| Webhook 文件发送 | `_WebhookSender.send_file()` | upload_media → 发送 (fallback) |
 
 ### 3. 文件处理
 
@@ -37,7 +38,8 @@
 |------|------|------|
 | 文件下载 | `download_media()` | httpx GET，从 Content-Disposition 解析文件名 |
 | AES-256-CBC 解密 | `_decrypt_file()` | per-file aeskey (base64)，iv=key[:16]，PKCS#7 pad 32B block |
-| 上传 | `upload_media()` | 不支持（图片通过 base64 内联发送） |
+| WS 分片上传 | `_ws_upload_media()` | init → chunk*N → finish，获取 media_id（有效期 3 天） |
+| upload_media | `upload_media()` | 封装 `_ws_upload_media()`，返回 MediaFile |
 
 ### 4. 启动流程
 
@@ -77,6 +79,9 @@
 | 客户端 → 服务端 | `aibot_respond_welcome_msg` | 回复欢迎语 |
 | 客户端 → 服务端 | `aibot_respond_update_msg` | 更新模板卡片 |
 | 客户端 → 服务端 | `aibot_send_msg` | 主动推送消息 |
+| 客户端 → 服务端 | `aibot_upload_media_init` | 上传初始化 |
+| 客户端 → 服务端 | `aibot_upload_media_chunk` | 上传分片 |
+| 客户端 → 服务端 | `aibot_upload_media_finish` | 上传完成 |
 | 服务端 → 客户端 | `aibot_msg_callback` | 消息推送 |
 | 服务端 → 客户端 | `aibot_event_callback` | 事件推送 |
 
@@ -84,10 +89,30 @@
 
 1. `cmd = "aibot_msg_callback"` → 消息处理
 2. `cmd = "aibot_event_callback"` → 事件处理
-3. 无 cmd + req_id 在 `_pending_acks` → 回复回执
+3. 无 cmd + req_id 在 `_pending_acks` → 回复/上传回执
 4. 无 cmd + req_id 以 `aibot_subscribe` 开头 → 认证响应
 5. 无 cmd + req_id 以 `ping` 开头 → 心跳响应
 6. 其他 → 日志记录
+
+### 支持的消息类型
+
+| 消息类型 | msgtype | 说明 |
+|---------|---------|------|
+| 文本消息 | text | 用户发送的文本内容 |
+| 图片消息 | image | 用户发送的图片，仅支持单聊 |
+| 图文混排 | mixed | 用户发送的图文混排内容 |
+| 语音消息 | voice | 用户发送的语音（转为文本），仅支持单聊 |
+| 文件消息 | file | 用户发送的文件，仅支持单聊 |
+| 视频消息 | video | 用户发送的视频，仅支持单聊 |
+
+### 支持的事件类型
+
+| 事件类型 | eventtype | 说明 |
+|---------|-----------|------|
+| 进入会话 | enter_chat | 用户当天首次进入机器人单聊会话 |
+| 模板卡片点击 | template_card_event | 用户点击模板卡片按钮 |
+| 用户反馈 | feedback_event | 用户对机器人回复进行反馈 |
+| 连接断开 | disconnected_event | 新连接踢掉旧连接时推送给旧连接 |
 
 ### 回复规则
 
@@ -96,6 +121,38 @@
 - **串行队列**：同一 `req_id` 的回复串行发送，每条等回执后才发下一条
 - **回执超时**：5 秒
 - **流式内容上限**：20480 字节/片（UTF-8），自动分片
+
+### 频率限制
+
+| 限制 | 值 |
+|------|-----|
+| 单会话消息频率 | 30 条/分钟，1000 条/小时 |
+| 上传频率 | 30 次/分钟，1000 次/小时 |
+| 回复窗口 | 收到消息后 24 小时内 |
+| 流式消息超时 | 首帧发送后 **6 分钟**内必须 finish=true |
+| 欢迎语/卡片更新超时 | 收到事件后 **5 秒**内必须回复 |
+
+### 上传临时素材协议
+
+```
+_ws_upload_media(path, mime_type) -> media_id
+
+1. init:   {cmd: "aibot_upload_media_init", body: {type, filename, total_size, total_chunks, md5}}
+           → 响应: {body: {upload_id}}
+2. chunk:  {cmd: "aibot_upload_media_chunk", body: {upload_id, chunk_index, base64_data}}
+           → 逐片上传，每片 ≤ 512KB（base64 编码前），最多 100 片
+           → 分片可乱序上传，重复上传同一分片会被忽略（幂等）
+3. finish: {cmd: "aibot_upload_media_finish", body: {upload_id}}
+           → 响应: {body: {type, media_id, created_at}}
+```
+
+上传约束：
+- 图片: ≤ 2MB (png/jpg/gif)
+- 语音: ≤ 2MB (amr)
+- 视频: ≤ 10MB (mp4)
+- 文件: ≤ 20MB
+- 上传会话有效期 30 分钟
+- media_id 有效期 3 天
 
 ---
 
@@ -110,6 +167,7 @@
 | 文件解密 | 全局 encoding_aes_key | per-file aeskey |
 | 流式回复 | 支持（HTTP 轮询刷新） | 原生支持（WebSocket stream） |
 | 主动推送 | 通过 response_url | 通过 `aibot_send_msg` cmd |
+| 媒体上传 | 不支持 | WS 分片上传 → media_id |
 | 心跳/重连 | 不需要 | 30s 心跳，指数退避重连 |
 | `supports_streaming` | False | True |
 
@@ -121,6 +179,7 @@
 
 - **回复消息**时必须使用收到消息帧中的 `req_id`（不能重新生成）
 - **主动推送**时必须使用自己生成的 `req_id`（前缀 `aibot_send_msg`）
+- **上传操作**时必须使用自己生成的 `req_id`（前缀 `aibot_upload_media_*`）
 - 服务端通过 `req_id` 关联消息与回复
 
 ### 约束 2：流式回复串行性
@@ -129,11 +188,12 @@
 - 每发一帧必须等待服务端回执（`errcode: 0`）后才能发下一帧
 - 不能并行发送同一 `req_id` 的帧（会导致消息乱序或丢失）
 
-### 约束 3：图片只能在 finish=true 时发送
+### 约束 3：图片/媒体发送方式
 
-- `stream.msg_item`（base64 图片）只在 `finish=true` 的最后一帧有效
-- 最多 10 张图片
-- 图片以 base64 编码内联发送（非 URL，非文件上传）
+- ~~`stream.msg_item`（base64 图片）~~ **已废弃**（2026/03 官方文档明确 "目前暂不支持 msg_item 字段"）
+- 新方式：先通过 WS 分片上传获取 `media_id`，再通过 `aibot_respond_msg` 发送 `{msgtype: "image", image: {media_id}}` 消息
+- 流式回复中的媒体：先 finish stream → 再追加 media 消息（使用同一 `req_id`）
+- 主动推送媒体：`aibot_send_msg` + `{msgtype: "image/file/voice/video", ...}`
 
 ### 约束 4：心跳超时判定
 
@@ -161,6 +221,18 @@
 - WS 回复失败时作为 HTTP POST 回退
 - 定期清理，保留最近 200 条
 
+### 约束 8：连接唯一性
+
+- 每个机器人同一时间只能保持一个有效长连接
+- 新连接 subscribe 成功后，旧连接会收到 `disconnected_event` 并被服务端断开
+- 需要在业务层避免同一机器人多连接
+
+### 约束 9：流式消息 6 分钟超时
+
+- 从首帧发送开始计时，6 分钟内必须设置 `finish=true`
+- 超时后消息自动结束，不可再更新
+- HTTP 模式的 `STREAM_TIMEOUT=330s` 约束不同，WS 模式为 360s
+
 ---
 
 ## 五、配置说明
@@ -173,7 +245,7 @@ WEWORK_WS_ENABLED=true
 WEWORK_WS_BOT_ID=your_bot_id
 WEWORK_WS_SECRET=your_bot_secret
 
-# 可选：群机器人 Webhook URL（用于发送图片/语音/文件）
+# 可选：群机器人 Webhook URL（作为 fallback 通道，WS 上传失败时使用）
 # 在企业微信群设置 → 群机器人 → 添加机器人 → 获取 Webhook 地址
 WEWORK_WS_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
 ```
@@ -195,6 +267,7 @@ WEWORK_WS_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
 - HTTP 回调模式和 WebSocket 模式可以**同时启用**（不同的 bot_id）
 - WebSocket 模式**不需要公网 IP**，适合开发和内网部署
 - `bot_id` 和 `secret` 在企业微信管理后台的智能机器人配置页面获取
+- 模式切换影响：API 模式只能选择一种方式（长连接或回调地址），切换会使另一种失效
 
 ---
 
@@ -208,7 +281,7 @@ WEWORK_WS_WEBHOOK_URL=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
     → _receive_loop()              # async for msg in ws
       → _route_frame()             # 按 cmd 分发
         → _handle_msg_callback()   # 消息去重 + 解析
-          → _parse_content()       # text/image/mixed/voice/file → MessageContent
+          → _parse_content()       # text/image/mixed/voice/file/video → MessageContent
           → UnifiedMessage.create()
           → _emit_message()        # 触发 gateway 回调
 ```
@@ -225,7 +298,8 @@ Agent 生成回复
             → _send_reply_with_ack(req_id, body, "aibot_respond_msg")
               → ws.send(frame)
               → await ack (5s timeout)
-        → 最后一片: finish=true + img_items
+        → 最后一片: finish=true
+        → 追加媒体消息 (images/files uploaded via _ws_upload_media)
 ```
 
 ### 消息发送流程 (主动推送)
@@ -234,8 +308,19 @@ Agent 生成回复
 Agent 主动发送
   → gateway 构造 OutgoingMessage (无 req_id)
     → adapter.send_message()
-      → _send_active_message()
+      → _send_active_message(chat_type=1|2)
         → _send_reply_with_ack(自生成 req_id, body, "aibot_send_msg")
+```
+
+### 媒体上传流程
+
+```
+send_image/file/voice/video()
+  → _ws_upload_media(path, mime_type)
+    → aibot_upload_media_init → upload_id
+    → aibot_upload_media_chunk × N (每片 ≤ 512KB)
+    → aibot_upload_media_finish → media_id
+  → 排入 _pending_media_msgs (回复模式) 或直接发送 (主动推送)
 ```
 
 ### 连接生命周期
@@ -251,7 +336,7 @@ start()
           → asyncio.gather:
               → _heartbeat_loop() [每 30s ping]
               → _receive_loop()   [读帧]
-        → on disconnect:
+        → on disconnect / disconnected_event:
           → 指数退避 (1s, 2s, 4s, ... 30s cap)
           → retry
 ```
@@ -263,12 +348,13 @@ start()
 | # | 严重度 | 问题 | 说明 |
 |---|--------|------|------|
 | 1 | 中 | 模板卡片回复未完整实现 | 已预留 cmd 常量，但 `send_message` 尚未支持构建模板卡片；需要 `OutgoingMessage` 扩展 |
-| 2 | 中 | 欢迎语回复未自动化 | `enter_chat` 事件已上报 Gateway，但需要 Gateway 层支持 5s 内自动回复欢迎语 |
+| 2 | ~~中~~ 已完成 | ~~欢迎语回复未自动化~~ | `__init__` 新增 `welcome_message` 参数，`enter_chat` 事件自动回复 |
 | 3 | 中 | 更新模板卡片未实现 | `aibot_respond_update_msg` cmd 已预留，等待业务需求 |
-| 4 | 低 | 流式回复中断无恢复 | 连接断开时进行中的 stream 直接标记失败，尝试 response_url 回退 |
+| 4 | ~~低~~ 已完成 | ~~流式回复中断无恢复~~ | 新增 `_pending_replies` 队列，WS 断连时暂存最终回复，重连后通过 response_url 或 active push 重试 |
 | 5 | 低 | response_url 缓存无 TTL | 仅按数量清理（200 条），未按时间清理过期 URL |
-| 6 | 低 | 引用消息 (quote) 未解析 | 消息体中的 `quote` 字段已在 raw 中保留，但未映射到 `reply_to` |
-| 7 | 低 | ~~语音消息只取转文字结果~~ (已优化) | `voice.content` 是企业微信自动转写的文字，原始音频不可获取。已统一 WS/Bot 输出格式：转写成功→直接用文本（无前缀），失败→`[语音消息，平台未能识别，请重新发送或改用文字]` |
+| 6 | ~~低~~ 已完成 | ~~引用消息 (quote) 未解析~~ | `_parse_quote_content()` 解析 `body.quote`，支持 text/image/voice/file/mixed，前缀到消息内容 |
+| 7 | ~~低~~ 已完成 | ~~语音消息只取转文字结果~~ (已优化) | 同上；另新增 ffmpeg 转换失败时自动降级为文件发送 |
+| 8 | 低 | feedback.id 未传递 | 回复/推送消息的 markdown/template_card 支持 `feedback.id` 字段以追踪用户反馈，当前未使用 |
 
 ---
 
@@ -278,21 +364,76 @@ start()
 
 - [ ] 回复消息是否透传了原始 `req_id`（而非重新生成）？
 - [ ] 主动推送是否使用了自己生成的 `req_id`（前缀 `aibot_send_msg`）？
+- [ ] 主动推送是否传递了 `chat_type` 字段（1=单聊，2=群聊）？
 - [ ] 同一 `req_id` 的回复是否保持串行（经过 `_reply_locks`）？
 - [ ] 流式回复的每一片是否等待了回执？
-- [ ] 图片 `msg_item` 是否只在 `finish=true` 时附加？
+- [ ] 媒体消息是否通过 `_ws_upload_media` 上传后用 `media_id` 发送（而非 msg_item）？
 - [ ] 新增的事件类型是否在 `_handle_event_callback` 中处理？
+- [ ] `disconnected_event` 是否设置 `_displaced=True` 并停止重连（而非仅关闭连接）？
 - [ ] 心跳超时判定是否在发送前检查？
-- [ ] `_reject_all_pending` 是否在断开/重连时调用？
+- [ ] `_reject_all_pending` 是否在断开/重连时调用（包括清理 `_pending_media_msgs`、`_thinking_tasks`）？
 - [ ] `is_mentioned` 是否保持为 True（平台已预过滤）？
 - [ ] 语音输出格式是否与 `wework_bot.py` 保持一致（转写成功→直接文本，失败→统一提示）？
 - [ ] `_WebhookSender` 是否在 `stop()` 时关闭 httpx 客户端？
-- [ ] 新增的媒体发送方法是否优先尝试 webhook 通道？
+- [ ] 媒体发送是否优先 WS upload → fallback webhook → fallback markdown hint？
+- [ ] 长耗时流式回复是否有 keepalive timer 防止 6 分钟超时？
+- [ ] 消息处理是否有超时保护（`_handle_msg_callback_safe`）？
+- [ ] 同一对话的消息处理是否经过 `_peer_locks` 串行化？
+- [ ] 超尺寸媒体是否通过 `_check_upload_size` 自动降级为 file 类型？
+- [ ] 语音发送 ffmpeg 失败时是否降级为文件发送（而非抛异常）？
 
 ---
 
-## 九、协议参考
+## 九、变更记录
 
-- 官方文档: https://open.work.weixin.qq.com/help2/pc/cat?doc_id=21657
-- SDK 源码: https://github.com/WecomTeam/aibot-node-sdk (MIT)
-- 本适配器参考 SDK 协议规范独立实现，非代码翻译
+### 2026-03-18 (二): 适配器健壮性优化 & 扫码配置
+
+基于 `openclaw-plugin-wecom` 插件源码分析，完成 12 项适配器优化和扫码配置功能：
+
+**适配器优化 (A1-A12)：**
+
+1. **A1 流式 Keepalive**: 新增 `_stream_keepalive_loop()`，每 4 分钟发送 `finish=false` 帧防止 6 分钟超时
+2. **A2 引用消息解析**: 新增 `_parse_quote_content()` 解析 `body.quote`，支持 text/image/voice/file/mixed 类型引用
+3. **A3 媒体类型自动降级**: `_validate_upload_size()` 重构为 `_check_upload_size()`，超尺寸 image/voice/video 自动降级为 file 类型
+4. **A4 Displaced 停止重连**: `disconnected_event` 设置 `_displaced=True` + `_running=False`，防止被踢后无限重连
+5. **A5 消息处理超时保护**: `_handle_msg_callback_safe()` 包装 `asyncio.wait_for(timeout=300s)`，超时发送提示并关闭流
+6. **A6 Per-Peer 消息序列化锁**: `_peer_locks` 按 `chat_id` 串行化，防止同一对话消息并发乱序
+7. **A7 可配置欢迎消息**: `__init__` 新增 `welcome_message` 参数，`enter_chat` 事件触发 `CMD_RESPONSE_WELCOME`
+8. **A8 动画思考指示器**: `_thinking_counter_loop()` 每秒更新 "等待模型响应 Ns"，收到回复时自动取消
+9. **A9 失败回复队列**: `_pending_replies` 队列（TTL 5min，max 50），WS 断连时暂存，重连后 `_flush_pending_replies()` 重试
+10. **A10 频率限制追踪**: `_RateLimitTracker` 按 chat_id 滑动窗口追踪 reply/min 和 reply/hour，80% 阈值告警
+11. **A11 语音优雅降级**: `send_voice()` ffmpeg 转换失败时自动降级为文件发送，不再抛异常
+12. **A12 消息去重 TTL 清理**: `_seen_msg_ids` 改为 `OrderedDict[str, float]`，增加 10 分钟 TTL 过期 + 数量上限双重淘汰
+
+**扫码配置 (B1-B5)：**
+
+- 新增 `wecom_onboard.py`: 封装 `/ai/qc/generate` 和 `/ai/qc/query_result` API
+- 新增 `api/routes/wecom_onboard.py`: FastAPI 路由 `/api/wecom/onboard/start|poll`
+- 新增 `WecomQRModal.tsx`: React 组件，复用 FeishuQRModal 架构
+- 修改 `IMConfigView.tsx`: 企微 WS 模式增加 "扫码配置机器人" 按钮
+- 修改 `main.rs`, `bridge.py`: 新增 `wecom-onboard-start/poll` Tauri 命令
+- 新增 zh/en i18n 文案
+
+### 2026-03-18: 协议对齐 & 功能补全
+
+对照官方长连接协议文档（更新于 2026/03/13），完成以下变更：
+
+1. **新增 WS 分片上传临时素材**：实现 `aibot_upload_media_init/chunk/finish` 三步上传协议，`upload_media()` 不再抛 `NotImplementedError`
+2. **修复图片发送**：`msg_item` 字段已被官方废弃，改为 WS 上传获取 `media_id` + 独立 image 消息发送
+3. **新增视频消息接收**：`_parse_content()` 支持 `video` 类型（含 aeskey 解密）
+4. **新增 `disconnected_event` 处理**：收到时优雅关闭连接，触发重连
+5. **主动推送增强**：`_send_active_message()` 支持 `chat_type` 参数；新增 `_send_active_media_message()` 支持 image/file/voice/video
+6. **新增 `send_video()` 方法**：通过 WS 上传发送视频消息
+7. **媒体发送优先级调整**：WS upload (首选) → Webhook (fallback) → Markdown hint (最终 fallback)
+8. **send_file/send_voice 增强**：均可通过 WS 上传直接发送，不再依赖 Webhook
+
+---
+
+## 十、协议参考
+
+- 官方长连接文档: https://developer.work.weixin.qq.com/document/path/101463
+- 官方 API 模式文档: https://developer.work.weixin.qq.com/document/path/101468
+- Node.js SDK: https://github.com/WecomTeam/aibot-node-sdk (MIT)
+- Python SDK: https://dldir1.qq.com/wework/wwopen/bot/aibot-python-sdk-1.0.0.zip
+- OpenClaw 官方插件: https://github.com/WecomTeam/wecom-openclaw-plugin (MIT)
+- 本适配器参考官方协议文档独立实现

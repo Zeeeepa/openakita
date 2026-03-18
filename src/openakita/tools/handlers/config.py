@@ -435,9 +435,15 @@ class ConfigHandler:
                 elif key in os.environ:
                     del os.environ[key]
 
-            # 热重载 settings
+            # 热重载 settings（reload 已跳过 _PERSISTABLE_KEYS 字段）
             changed_fields = settings.reload()
             logger.info(f"[ConfigHandler] set: updated {len(env_entries)} entries, reloaded fields: {changed_fields}")
+
+            # 双重保险：恢复运行时持久化字段（防止旧版 reload 或异常路径覆盖）
+            try:
+                runtime_state.load()
+            except Exception as e:
+                logger.warning(f"[ConfigHandler] runtime_state.load failed: {e}")
 
             # 持久化 runtime_state（如果修改了可持久化的字段）
             try:

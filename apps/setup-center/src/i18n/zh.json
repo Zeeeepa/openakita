@@ -1480,12 +1480,27 @@
     "qrSubtitle": "使用手机 QQ 扫描二维码登录开发者后台并创建机器人",
     "qrLoading": "正在创建会话...",
     "qrScanHint": "请使用手机 QQ 扫描上方二维码",
+    "qrScanNote": "扫码后将跳转到 QQ 开放平台，请在平台上完成机器人创建，然后将获得的 AppID 和 AppSecret 手动填入下方配置。",
     "qrSuccess": "机器人创建成功！凭证已自动填入",
+    "qrPartialSuccess": "已获取到 AppID，请前往 QQ 开放平台查看并手动填入 AppSecret",
     "qrRetry": "重试",
     "qrTimeout": "扫码超时，请重试",
     "qrInitFailed": "初始化失败，请检查网络",
     "qrLoginOk": "登录成功，正在创建机器人...",
     "qrCreateFailed": "创建机器人失败",
     "qrNeedBrowser": "该接口需要浏览器登录态，请在浏览器中手动创建"
+  },
+  "wecom": {
+    "qrScanConfig": "扫码配置机器人",
+    "qrTitle": "企业微信扫码配置",
+    "qrSubtitle": "使用企业微信管理员扫描二维码，自动获取 Bot ID 和 Secret",
+    "qrLoading": "正在生成二维码...",
+    "qrScanHint": "请使用企业微信 APP 扫描上方二维码",
+    "qrSuccess": "配置成功！凭证已自动填入",
+    "qrRetry": "重试",
+    "qrTimeout": "扫码超时，请重试",
+    "qrExpired": "二维码已过期，请重试",
+    "qrFailed": "扫码配置失败",
+    "qrInitFailed": "初始化失败，请检查网络"
   }
 }

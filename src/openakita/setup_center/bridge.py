@@ -905,6 +905,29 @@ async def feishu_validate(app_id: str, app_secret: str, domain: str) -> None:
     _json_print(result)
 
 
+async def wecom_onboard_start() -> None:
+    """生成企微扫码配置二维码，返回 qr_url + qr_id"""
+    from openakita.setup.wecom_onboard import WecomOnboard
+
+    ob = WecomOnboard()
+    data = await ob.generate()
+    result = {
+        "qr_url": data.get("qr_url", ""),
+        "qr_id": data.get("qr_id", ""),
+        "expire_in": data.get("expire_in", 300),
+    }
+    _json_print(result)
+
+
+async def wecom_onboard_poll(qr_id: str) -> None:
+    """单次轮询企微扫码配置结果"""
+    from openakita.setup.wecom_onboard import WecomOnboard
+
+    ob = WecomOnboard()
+    result = await ob.poll(qr_id)
+    _json_print(result)
+
+
 async def qqbot_onboard_start() -> None:
     """创建 QQ 登录会话，返回 session_id 和 QR URL"""
     from openakita.setup.qqbot_onboard import QQBotOnboard
@@ -936,6 +959,18 @@ async def qqbot_onboard_create() -> None:
     ob = QQBotOnboard()
     try:
         result = await ob.create_bot()
+        _json_print(result)
+    finally:
+        await ob.close()
+
+
+async def qqbot_onboard_poll_and_create(session_id: str) -> None:
+    """原子操作：poll 确认登录态 + 创建机器人（同一 httpx 客户端保持 cookie）"""
+    from openakita.setup.qqbot_onboard import QQBotOnboard
+
+    ob = QQBotOnboard()
+    try:
+        result = await ob.poll_and_create(session_id)
         _json_print(result)
     finally:
         await ob.close()
@@ -1563,12 +1598,20 @@ def main(argv: list[str] | None = None) -> None:
     p_fv.add_argument("--app-secret", required=True, help="飞书 App Secret")
     p_fv.add_argument("--domain", default="feishu", help="feishu | lark")
 
+    sub.add_parser("wecom-onboard-start", help="生成企微扫码配置二维码（JSON）")
+
+    p_wop = sub.add_parser("wecom-onboard-poll", help="轮询企微扫码配置结果（JSON）")
+    p_wop.add_argument("--qr-id", required=True, help="generate 返回的 qr_id")
+
     sub.add_parser("qqbot-onboard-start", help="创建 QQ 登录会话（JSON）")
 
     p_qop = sub.add_parser("qqbot-onboard-poll", help="轮询 QQ 扫码登录状态（JSON）")
     p_qop.add_argument("--session-id", required=True, help="create_session 返回的 session_id")
 
     sub.add_parser("qqbot-onboard-create", help="创建 QQ 机器人（JSON）")
+
+    p_qpc = sub.add_parser("qqbot-onboard-poll-and-create", help="原子 poll+create（JSON）")
+    p_qpc.add_argument("--session-id", required=True, help="create_session 返回的 session_id")
 
     p_qv = sub.add_parser("qqbot-validate", help="验证 QQ 机器人凭证有效性（JSON）")
     p_qv.add_argument("--app-id", required=True, help="QQ 机器人 App ID")
@@ -1650,6 +1693,14 @@ def main(argv: list[str] | None = None) -> None:
         ))
         return
 
+    if args.cmd == "wecom-onboard-start":
+        asyncio.run(wecom_onboard_start())
+        return
+
+    if args.cmd == "wecom-onboard-poll":
+        asyncio.run(wecom_onboard_poll(qr_id=args.qr_id))
+        return
+
     if args.cmd == "qqbot-onboard-start":
         asyncio.run(qqbot_onboard_start())
         return
@@ -1660,6 +1711,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.cmd == "qqbot-onboard-create":
         asyncio.run(qqbot_onboard_create())
+        return
+
+    if args.cmd == "qqbot-onboard-poll-and-create":
+        asyncio.run(qqbot_onboard_poll_and_create(session_id=args.session_id))
         return
 
     if args.cmd == "qqbot-validate":

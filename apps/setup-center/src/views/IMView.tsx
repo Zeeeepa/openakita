@@ -7,6 +7,7 @@ import {
   IconBot, IconPlus, IconEdit, IconTrash,
   IconUser, IconUsers,
   DotGreen, DotGray,
+  IM_LOGO_MAP,
 } from "../icons";
 import { safeFetch } from "../providers";
 import { ModalOverlay } from "../components/ModalOverlay";
@@ -20,6 +21,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 type IMChannel = {
   channel: string;
+  channel_type?: string;
   name: string;
   status: "online" | "offline";
   sessionCount: number;
@@ -75,7 +77,7 @@ type AgentProfile = {
 
 const DEFAULT_API = "http://127.0.0.1:18900";
 
-const BOT_TYPES = ["feishu", "telegram", "dingtalk", "wework", "wework_ws", "onebot", "onebot_reverse", "qqbot"] as const;
+const BOT_TYPES = ["wework", "wework_ws", "qqbot", "feishu", "dingtalk", "telegram", "onebot", "onebot_reverse"] as const;
 
 const BOT_TYPE_LABELS: Record<string, string> = {
   feishu: "飞书",
@@ -91,14 +93,16 @@ const BOT_TYPE_LABELS: Record<string, string> = {
 const WEWORK_TYPES = new Set(["wework", "wework_ws"]);
 const ONEBOT_TYPES = new Set(["onebot", "onebot_reverse"]);
 
-const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; secret?: boolean }[]> = {
+const CREDENTIAL_FIELDS: Record<string, { key: string; label: string; secret?: boolean; placeholder?: string }[]> = {
   feishu: [
     { key: "app_id", label: "App ID" },
     { key: "app_secret", label: "App Secret", secret: true },
   ],
   telegram: [
-    { key: "bot_token", label: "Bot Token", secret: true },
-    { key: "webhook_url", label: "Webhook URL" },
+    { key: "bot_token", label: "Bot Token", secret: true, placeholder: "BotFather token" },
+    { key: "proxy", label: "config.imProxy", placeholder: "http://127.0.0.1:7890" },
+    { key: "pairing_code", label: "config.imPairingCode", placeholder: "config.imPairingCodeHint" },
+    { key: "webhook_url", label: "Webhook URL", placeholder: "https://..." },
   ],
   dingtalk: [
     { key: "client_id", label: "Client ID / App Key" },
@@ -335,6 +339,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
             >
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 {ch.status === "online" ? <DotGreen /> : <DotGray />}
+                {(IM_LOGO_MAP[(ch.channel_type || "").toLowerCase()] || IM_LOGO_MAP[(ch.channel || "").toLowerCase()])?.({ size: 14 })}
                 <span className="imChannelName">{getChannelDisplayName(ch)}</span>
               </div>
               <span className="imChannelCount">{ch.sessionCount}</span>
@@ -425,6 +430,21 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
   const [revealedSecrets, setRevealedSecrets] = useState<Set<string>>(new Set());
   const [showFeishuQR, setShowFeishuQR] = useState(false);
   const [showQQBotQR, setShowQQBotQR] = useState(false);
+  const [tgPairingCode, setTgPairingCode] = useState<string | null>(null);
+  const [tgPairingLoading, setTgPairingLoading] = useState(false);
+
+  const loadTgPairingCode = useCallback(async () => {
+    setTgPairingLoading(true);
+    try {
+      const res = await safeFetch(`${apiBase}/api/im/telegram/pairing-code`);
+      const data = await res.json();
+      setTgPairingCode(data.code || null);
+    } catch {
+      setTgPairingCode(null);
+    } finally {
+      setTgPairingLoading(false);
+    }
+  }, [apiBase]);
 
   const showToast = useCallback((text: string, type: "ok" | "err" = "ok") => {
     setToastMsg({ text, type });
@@ -450,10 +470,8 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
   }, [apiBase]);
 
   useEffect(() => {
-    if (multiAgentEnabled) {
-      fetchBots();
-      fetchProfiles();
-    }
+    fetchBots();
+    fetchProfiles();
   }, [multiAgentEnabled, fetchBots, fetchProfiles]);
 
   const openCreate = () => {
@@ -468,6 +486,7 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
     setIsCreating(false);
     setEditorOpen(true);
     setRevealedSecrets(new Set());
+    if (bot.type === "telegram") loadTgPairingCode();
   };
 
   const closeEditor = () => {
@@ -660,11 +679,13 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
               onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
             >
               {/* Type badge */}
-              <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
+              <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4, alignItems: "center" }}>
                 <span style={{
                   fontSize: 10, fontWeight: 600, padding: "2px 6px", borderRadius: 4,
                   background: "rgba(99,102,241,0.12)", color: "#6366f1",
+                  display: "inline-flex", alignItems: "center", gap: 3,
                 }}>
+                  {IM_LOGO_MAP[bot.type]?.({ size: 12 })}
                   {BOT_TYPE_LABELS[bot.type] || bot.type}
                 </span>
                 <span style={{
@@ -858,7 +879,7 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
                 style={{
                   width: "100%", padding: "8px 10px", borderRadius: 6,
                   border: "1px solid var(--line)", background: isCreating ? "var(--bg)" : "var(--panel)",
-                  fontSize: 13, boxSizing: "border-box",
+                  fontSize: 13, lineHeight: 1.4, boxSizing: "border-box",
                 }}
               >
                 {BOT_TYPES.filter((bt) => bt !== "wework" && bt !== "onebot").map((bt) => (
@@ -878,7 +899,7 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
                 style={{
                   width: "100%", padding: "8px 10px", borderRadius: 6,
                   border: "1px solid var(--line)", background: "var(--bg)",
-                  fontSize: 13, boxSizing: "border-box",
+                  fontSize: 13, lineHeight: 1.4, boxSizing: "border-box",
                 }}
               >
                 <option value="default">{t("im.botAgentDefault")}</option>
@@ -946,12 +967,13 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
             <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{t("im.botCredentials")}</div>
             {credFields.map((field) => (
               <label key={field.key} style={{ display: "block", marginBottom: 10 }}>
-                <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 2 }}>{field.label}</div>
+                <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 2 }}>{t(field.label, { defaultValue: field.label })}</div>
                 <div style={{ display: "flex", gap: 4 }}>
                   <input
                     type={field.secret && !revealedSecrets.has(field.key) ? "password" : "text"}
                     value={String(editingBot.credentials[field.key] ?? "")}
                     onChange={(e) => updateCredential(field.key, e.target.value)}
+                    placeholder={field.placeholder ? t(field.placeholder, { defaultValue: field.placeholder }) : undefined}
                     style={{
                       flex: 1, padding: "7px 10px", borderRadius: 6,
                       border: "1px solid var(--line)", background: "var(--bg)",
@@ -979,6 +1001,44 @@ function BotConfigTab({ apiBase, multiAgentEnabled, onRequestRestart, venvDir, a
                 </div>
               </label>
             ))}
+
+            {/* Telegram: require_pairing checkbox + pairing code hint */}
+            {editingBot.type === "telegram" && (
+              <>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={editingBot.credentials.require_pairing === "true" || editingBot.credentials.require_pairing === true || editingBot.credentials.require_pairing === undefined}
+                    onChange={(e) => updateCredential("require_pairing", e.target.checked ? "true" : "false")}
+                    style={{ width: 16, height: 16 }}
+                  />
+                  <span style={{ fontSize: 12 }}>{t("config.imPairing")}</span>
+                </label>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11, opacity: 0.7, marginBottom: 12, lineHeight: "24px" }}>
+                  <span>🔑 {t("config.imCurrentPairingCode")}：</span>
+                  {tgPairingLoading ? (
+                    <span style={{ opacity: 0.5 }}>...</span>
+                  ) : tgPairingCode ? (
+                    <code style={{ background: "var(--muted, #f3f4f6)", padding: "1px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600, letterSpacing: "0.1em", userSelect: "all" }}>{tgPairingCode}</code>
+                  ) : (
+                    <span style={{ opacity: 0.5 }}>{t("config.imPairingCodeNotGenerated")}</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={loadTgPairingCode}
+                    disabled={tgPairingLoading}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 3,
+                      padding: "2px 8px", borderRadius: 4, fontSize: 11,
+                      border: "1px solid var(--line)", background: "transparent",
+                      cursor: tgPairingLoading ? "not-allowed" : "pointer", opacity: tgPairingLoading ? 0.5 : 1,
+                    }}
+                  >
+                    <IconRefresh size={11} /> {t("common.refresh")}
+                  </button>
+                </div>
+              </>
+            )}
 
             {/* QQ Bot: QR onboard + sandbox checkbox + mode toggle */}
             {editingBot.type === "qqbot" && (

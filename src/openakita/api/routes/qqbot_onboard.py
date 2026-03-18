@@ -65,3 +65,20 @@ async def onboard_create():
     except Exception as e:
         logger.error(f"QQBot onboard create failed: {e}", exc_info=True)
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@router.post("/poll-and-create")
+async def onboard_poll_and_create(body: PollRequest):
+    """Atomic poll + create in one httpx client so cookies carry over."""
+    try:
+        from openakita.setup.qqbot_onboard import QQBotOnboard
+
+        ob = QQBotOnboard()
+        try:
+            result = await ob.poll_and_create(body.session_id)
+            return JSONResponse(content=result)
+        finally:
+            await ob.close()
+    except Exception as e:
+        logger.error(f"QQBot onboard poll-and-create failed: {e}", exc_info=True)
+        return JSONResponse(status_code=500, content={"error": str(e)})
