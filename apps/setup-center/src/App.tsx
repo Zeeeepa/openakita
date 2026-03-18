@@ -208,8 +208,6 @@ export function App() {
   // ── Restart overlay state ──
   const [restartOverlay, setRestartOverlay] = useState<{ phase: "saving" | "restarting" | "waiting" | "done" | "fail" | "notRunning" } | null>(null);
 
-  // ── Module restart prompt ──
-  const [moduleRestartPrompt, setModuleRestartPrompt] = useState<string | null>(null);
 
   // ── Service conflict & version state ──
   const [conflictDialog, setConflictDialog] = useState<{ pid: number; version: string } | null>(null);
@@ -273,7 +271,7 @@ export function App() {
     [t],
   );
 
-  const [view, setView] = useState<"wizard" | "status" | "chat" | "skills" | "im" | "onboarding" | "modules" | "token_stats" | "mcp" | "scheduler" | "memory" | "identity" | "dashboard" | "agent_manager" | "agent_store" | "skill_store">((IS_WEB || IS_CAPACITOR) ? "chat" : "wizard");
+  const [view, setView] = useState<"wizard" | "status" | "chat" | "skills" | "im" | "onboarding" | "token_stats" | "mcp" | "scheduler" | "memory" | "identity" | "dashboard" | "agent_manager" | "agent_store" | "skill_store">((IS_WEB || IS_CAPACITOR) ? "chat" : "wizard");
   const [appInitializing, setAppInitializing] = useState(!(IS_WEB || IS_CAPACITOR));
   const [configExpanded, setConfigExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -328,11 +326,7 @@ export function App() {
 
   // ── Onboarding Wizard (首次安装引导) ──
   type OnboardingStep = "ob-welcome" | "ob-agreement" | "ob-llm" | "ob-im" | "ob-cli" | "ob-progress" | "ob-done";
-  type ModuleInfo = { id: string; name: string; description: string; installed: boolean; bundled: boolean; sizeMb: number; category: string };
   const [obStep, setObStep] = useState<OnboardingStep>("ob-welcome");
-  const [obModules, setObModules] = useState<ModuleInfo[]>([]);
-  /** 卸载因“拒绝访问”失败时，可先停止后端再卸载的待处理模块 */
-  const [moduleUninstallPending, setModuleUninstallPending] = useState<{ id: string; name: string } | null>(null);
   const [obInstallLog, setObInstallLog] = useState<string[]>([]);
   const [obInstalling, setObInstalling] = useState(false);
   const [obEnvCheck, setObEnvCheck] = useState<{
@@ -6668,16 +6662,6 @@ export function App() {
   }
 
   // ── Onboarding Wizard 渲染 ──
-  async function obLoadModules() {
-    if (!IS_TAURI) return;
-    try {
-      const modules = await invoke<ModuleInfo[]>("detect_modules");
-      setObModules(modules);
-
-    } catch (e) {
-      logger.warn("App", "detect_modules failed", { error: String(e) });
-    }
-  }
 
   async function obLoadEnvCheck() {
     if (!IS_TAURI) return;
@@ -7384,9 +7368,6 @@ export function App() {
               <div className="obFooterBtns">
                 <Button variant="outline" onClick={() => setObStep("ob-llm")}>{t("config.prev")}</Button>
                 <Button onClick={() => setObStep("ob-cli")}>{t("config.next")}</Button>
-                <Button variant="secondary" onClick={() => setObStep("ob-cli")} title={t("onboarding.im.skip")}>
-                  {t("onboarding.im.skipShort") || t("onboarding.im.skip")}
-                </Button>
               </div>
             </div>
           </div>
@@ -7406,7 +7387,7 @@ export function App() {
                   <Checkbox checked={obCliOpenakita} onCheckedChange={() => setObCliOpenakita(!obCliOpenakita)} />
                   <div className="obModuleInfo">
                     <strong style={{ fontFamily: "monospace", fontSize: 15 }}>openakita</strong>
-                    <span className="obModuleDesc">完整命令名称</span>
+                    <span className="obModuleDesc">{t("onboarding.system.cmdFull")}</span>
                   </div>
                 </label>
 
@@ -7414,16 +7395,16 @@ export function App() {
                   <Checkbox checked={obCliOa} onCheckedChange={() => setObCliOa(!obCliOa)} />
                   <div className="obModuleInfo">
                     <strong style={{ fontFamily: "monospace", fontSize: 15 }}>oa</strong>
-                    <span className="obModuleDesc">简短别名，推荐日常使用</span>
+                    <span className="obModuleDesc">{t("onboarding.system.cmdShort")}</span>
                   </div>
-                  <Badge variant="secondary" className="obModuleBadge obModuleBadgeRec">推荐</Badge>
+                  <Badge variant="secondary" className="obModuleBadge obModuleBadgeRec">{t("onboarding.system.recommended")}</Badge>
                 </label>
 
                 <label className="obModuleItem" data-checked={obCliAddToPath || undefined}>
                   <Checkbox checked={obCliAddToPath} onCheckedChange={() => setObCliAddToPath(!obCliAddToPath)} />
                   <div className="obModuleInfo">
-                    <strong>添加到系统 PATH</strong>
-                    <span className="obModuleDesc">新打开的终端中可直接输入命令名运行，无需完整路径</span>
+                    <strong>{t("onboarding.system.addToPath")}</strong>
+                    <span className="obModuleDesc">{t("onboarding.system.addToPathDesc")}</span>
                   </div>
                 </label>
 
@@ -7442,17 +7423,17 @@ export function App() {
               {(obCliOpenakita || obCliOa) && (
                 <Card className="mt-4">
                   <CardContent className="py-4 px-5 space-y-2.5">
-                    <p className="text-[13px] font-semibold text-muted-foreground">安装后可使用的命令示例</p>
+                    <p className="text-[13px] font-semibold text-muted-foreground">{t("onboarding.system.cmdExamples")}</p>
                     <div className="bg-slate-900 rounded-lg px-4 py-3.5 font-mono text-[13px] leading-[1.9] text-slate-200 overflow-x-auto">
                       {obCliOa && <>
-                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> serve <span className="text-slate-400 ml-6"># 启动后端服务</span></div>
-                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> status <span className="text-slate-400 ml-4"># 查看运行状态</span></div>
-                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> run <span className="text-slate-400 ml-9"># 单次对话</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> serve <span className="text-slate-400 ml-6">{t("onboarding.system.commentServe")}</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> status <span className="text-slate-400 ml-4">{t("onboarding.system.commentStatus")}</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> run <span className="text-slate-400 ml-9">{t("onboarding.system.commentRun")}</span></div>
                       </>}
                       {obCliOa && obCliOpenakita && <div className="h-1" />}
                       {obCliOpenakita && <>
-                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> init <span className="text-slate-400 ml-2"># 初始化工作区</span></div>
-                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> serve <span className="text-slate-400"># 启动后端服务</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> init <span className="text-slate-400 ml-2">{t("onboarding.system.commentInit")}</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> serve <span className="text-slate-400">{t("onboarding.system.commentServe")}</span></div>
                       </>}
                     </div>
                   </CardContent>
@@ -7464,7 +7445,7 @@ export function App() {
               <div className="obFooterBtns">
                 <Button variant="outline" onClick={() => setObStep("ob-im")}>{t("config.prev")}</Button>
                 <Button onClick={() => { setObStep("ob-progress"); obRunSetup(); }}>
-                  {t("onboarding.modules.startInstall")}
+                  {t("onboarding.system.startInstall")}
                 </Button>
               </div>
             </div>
@@ -7489,7 +7470,7 @@ export function App() {
             <div className="obContent" style={{ display: "flex", flexDirection: "column", gap: 0, flex: 1, minHeight: 0 }}>
               <h2 className="obStepTitle">{t("onboarding.progress.title")}</h2>
               <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.5 }}>
-                模块与运行环境体积较大，安装过程中请耐心等待，请勿关闭本窗口。
+                {t("onboarding.progress.patience")}
               </p>
 
               {/* ── 任务进度列表 ── */}
@@ -7524,7 +7505,7 @@ export function App() {
                       )}
                     </div>
                     {task.status === "running" && (
-                      <span style={{ fontSize: 12, color: "#3b82f6", flexShrink: 0, fontWeight: 500 }}>进行中</span>
+                      <span style={{ fontSize: 12, color: "#3b82f6", flexShrink: 0, fontWeight: 500 }}>{t("onboarding.progress.inProgress")}</span>
                     )}
                   </div>
                 ))}
@@ -7541,7 +7522,7 @@ export function App() {
                 ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}
               >
                 {obDetailLog.length === 0 && (
-                  <div style={{ color: "#64748b" }}>等待任务开始...</div>
+                  <div style={{ color: "#64748b" }}>{t("onboarding.progress.waitingStart")}</div>
                 )}
                 {obDetailLog.map((line, i) => (
                   <div key={i} style={{
@@ -7754,137 +7735,6 @@ export function App() {
           apiBaseUrl={apiBaseUrl}
           visible={view === "skill_store"}
         />
-      );
-    }
-    if (view === "modules") {
-      return (
-        <div>
-          {_disableToggle("modules", "模块管理")}
-          {disabledViews.includes("modules") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-        <div className="card">
-          <h2 className="cardTitle">{t("modules.title")}</h2>
-          <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>{t("modules.desc")}</p>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16, padding: "10px 14px", background: "var(--warn-bg, #fffbeb)", borderRadius: 8, border: "1px solid var(--warn-border, #fde68a)", fontSize: 13, color: "var(--warn, #92400e)", lineHeight: 1.6 }}>
-            <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>⚠️</span>
-            <span>{t("modules.legacyNotice")}</span>
-          </div>
-          {moduleUninstallPending && currentWorkspaceId && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, padding: "10px 12px", background: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca" }}>
-              <span style={{ flex: 1, fontSize: 13 }}>{t("modules.uninstallFailInUse")}</span>
-              <button
-                type="button"
-                className="btnPrimary btnSmall"
-                disabled={!!busy}
-                onClick={async () => {
-                  const { id, name } = moduleUninstallPending;
-                  if (!IS_TAURI) { notifyError("模块管理仅限桌面端"); return; }
-                  const _b = notifyLoading(t("status.stopping"));
-                  try {
-                    const ss = await invoke<{ running: boolean; pid: number | null; pidFile: string }>("openakita_service_stop", { workspaceId: currentWorkspaceId });
-                    setServiceStatus(ss);
-                    await new Promise((r) => setTimeout(r, 1500));
-                    await invoke("uninstall_module", { moduleId: id });
-                    notifySuccess(t("modules.uninstalled", { name }));
-                    setModuleUninstallPending(null);
-                    obLoadModules();
-                  } catch (e) {
-                    notifyError(String(e));
-                  } finally {
-                    dismissLoading(_b);
-                  }
-                }}
-              >
-                {t("modules.stopAndUninstall")}
-              </button>
-              <button type="button" className="btnSmall" onClick={() => { setModuleUninstallPending(null); }}>{t("common.cancel")}</button>
-            </div>
-          )}
-          <div className="obModuleList">
-            {obModules.map((m) => (
-              <div key={m.id} className={`obModuleItem ${m.installed || m.bundled ? "obModuleInstalled" : ""}`}>
-                <div className="obModuleInfo" style={{ flex: 1 }}>
-                  <strong>{m.name}</strong>
-                  <span className="obModuleDesc">{m.description}</span>
-                  <span className="obModuleSize">~{m.sizeMb} MB</span>
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  {(m.installed || m.bundled) ? (
-                    <>
-                      <span className="obModuleBadge">{t("modules.installed")}</span>
-                      <button
-                        className="btnSmall"
-                        style={{ color: "#ef4444" }}
-                        onClick={async () => {
-                          if (!IS_TAURI) return;
-                          const doUninstall = async () => {
-                            await invoke("uninstall_module", { moduleId: m.id });
-                            notifySuccess(t("modules.uninstalled", { name: m.name }));
-                            obLoadModules();
-                            if (serviceStatus?.running) {
-                              setModuleRestartPrompt(m.name);
-                            }
-                          };
-                          const _b = notifyLoading(t("modules.uninstalling", { name: m.name }));
-                          try {
-                            await doUninstall();
-                          } catch (e) {
-                            const msg = String(e);
-                            const isAccessDenied = /拒绝访问|Access denied|os error 5/i.test(msg);
-                            if (isAccessDenied && serviceStatus?.running && currentWorkspaceId) {
-                              notifyError(t("modules.uninstallFailInUse"));
-                              setModuleUninstallPending({ id: m.id, name: m.name });
-                              return;
-                            }
-                            notifyError(msg);
-                          } finally {
-                            dismissLoading(_b);
-                          }
-                        }}
-                        disabled={m.bundled || !!busy}
-                        title={m.bundled ? t("modules.bundledCannotUninstall") : t("modules.uninstall")}
-                      >
-                        {t("modules.uninstall")}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="btnPrimary btnSmall"
-                      onClick={async () => {
-                        if (!IS_TAURI) return;
-                        const _b = notifyLoading(t("modules.installing", { name: m.name }));
-                        try {
-                          await invoke("install_module", { moduleId: m.id, mirror: null });
-                          notifySuccess(t("modules.installSuccess", { name: m.name }));
-                          obLoadModules();
-                          if (serviceStatus?.running) {
-                            setModuleRestartPrompt(m.name);
-                          }
-                        } catch (e) {
-                          notifyError(String(e));
-                        } finally {
-                          dismissLoading(_b);
-                        }
-                      }}
-                      disabled={!!busy}
-                    >
-                      {t("modules.install")}
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {obModules.length === 0 && <p style={{ color: "#94a3b8" }}>{t("modules.loading")}</p>}
-          </div>
-          <button className="btnSmall" style={{ marginTop: 16 }} onClick={obLoadModules} disabled={!!busy}>
-            {t("modules.refresh")}
-          </button>
-        </div>
-          )}
-        </div>
       );
     }
     switch (stepId) {
@@ -8269,24 +8119,6 @@ export function App() {
         )}
         <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-        {/* ── Module restart prompt ── */}
-        {moduleRestartPrompt && (
-          <ModalOverlay onClose={() => setModuleRestartPrompt(null)}>
-            <div className="modalContent" style={{ maxWidth: 400, padding: "28px 24px", borderRadius: 16 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>{t("modules.restartTitle")}</div>
-              <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 20, lineHeight: 1.6 }}>
-                {t("modules.restartDesc", { name: moduleRestartPrompt })}
-              </div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <button className="btnSmall" onClick={() => setModuleRestartPrompt(null)}>{t("modules.restartLater")}</button>
-                <button className="btnPrimary btnSmall" onClick={async () => {
-                  setModuleRestartPrompt(null);
-                  await applyAndRestart([]);
-                }}>{t("modules.restartNow")}</button>
-              </div>
-            </div>
-          </ModalOverlay>
-        )}
 
         {/* ── Service conflict dialog ── */}
         {conflictDialog && (
