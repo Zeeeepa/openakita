@@ -596,9 +596,9 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
               <button
                 key={ch.channel}
                 className={cn(
-                  "flex w-full items-center justify-between rounded-[10px] px-2.5 py-2 text-[13px] font-semibold transition-[background,color,border] duration-150 cursor-pointer select-none",
+                  "flex w-full items-center justify-between rounded-[10px] px-2.5 py-2 text-[13px] font-semibold transition-[background,color,border,box-shadow] duration-150 cursor-pointer select-none",
                   selectedChannel === ch.channel
-                    ? "bg-[rgba(37,99,235,0.12)] dark:bg-[rgba(96,165,250,0.18)] text-[var(--brand)] border-l-[3px] border-l-[var(--brand)] border-y border-y-transparent border-r border-r-transparent"
+                    ? "bg-[#93c5fd] dark:bg-[#1d4ed8]/40 text-[#1e40af] dark:text-[#93c5fd] font-bold border-l-[4px] border-l-primary ring-1 ring-primary/50 shadow-md"
                     : "hover:bg-[var(--nav-hover)] text-muted-foreground border-l-[3px] border-transparent hover:text-foreground"
                 )}
                 onClick={() => handleSelectChannel(ch.channel)}
@@ -674,10 +674,10 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
                     <div
                       key={s.sessionId}
                       className={cn(
-                        "group flex flex-col gap-0.5 rounded-[10px] py-1.5 transition-[background,color] duration-150 cursor-pointer select-none border",
+                        "group flex flex-col gap-0.5 rounded-[10px] py-1.5 transition-[background,color,border,box-shadow] duration-150 cursor-pointer select-none border",
                         item.indented ? "pl-5 pr-2.5" : "px-2.5",
                         selectedSessionId === s.sessionId
-                          ? "bg-[var(--nav-active)] text-[var(--brand)] border-[var(--nav-active-border)]"
+                          ? "bg-[#dbeafe] dark:bg-[#1e3a5f] text-primary border-primary/40 dark:border-primary/50 ring-1 ring-primary/30 dark:ring-primary/40 shadow-md"
                           : "hover:bg-[var(--nav-hover)] border-transparent",
                         !isBotActive && "opacity-50",
                       )}
@@ -742,7 +742,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
                           size="icon-xs"
                           className={cn(
                             "transition-opacity text-muted-foreground hover:text-foreground shrink-0",
-                            openMenuSessionId === s.sessionId ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                            openMenuSessionId === s.sessionId ? "opacity-100" : "opacity-50 group-hover:opacity-100",
                           )}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -810,41 +810,7 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
                 <span className="text-xs font-bold text-muted-foreground">
                   {t("im.messages")} ({totalMessages})
                 </span>
-                <div className="flex items-center gap-1.5">
-                  {selectMode ? (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 text-[11px] px-2"
-                        onClick={() => { setSelectMode(false); setSelectedMsgIds(new Set()); }}
-                      >
-                        {t("im.cancelSelect")}
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        className="h-6 text-[11px] px-2"
-                        disabled={selectedMsgIds.size === 0}
-                        onClick={() => setConfirmDialog({
-                          message: `确定要删除选中的 ${selectedMsgIds.size} 条消息吗？\n消息将被永久删除，不可恢复。`,
-                          onConfirm: handleDeleteMessages,
-                        })}
-                      >
-                        {t("im.confirmDeleteN", { count: selectedMsgIds.size })}
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-6 text-[11px] px-2"
-                      onClick={() => setSelectMode(true)}
-                    >
-                      {t("im.batchDelete")}
-                    </Button>
-                  )}
-                </div>
+                {/* TODO: batch delete — hidden until backend reliability is confirmed */}
               </div>
               {/* Date range filter */}
               <div className="flex items-center gap-2 px-4 py-1.5 border-b">
@@ -1094,9 +1060,9 @@ function GroupPolicyTab({ apiBase }: { apiBase: string }) {
             <button
               key={ch.channel}
               className={cn(
-                "flex w-full items-center gap-1.5 rounded-[10px] px-2.5 py-2 text-[13px] font-semibold transition-[background,color,border] duration-150 cursor-pointer select-none",
+                "flex w-full items-center gap-1.5 rounded-[10px] px-2.5 py-2 text-[13px] font-semibold transition-[background,color,border,box-shadow] duration-150 cursor-pointer select-none",
                 selectedChannel === ch.channel
-                  ? "bg-[rgba(37,99,235,0.12)] dark:bg-[rgba(96,165,250,0.18)] text-[var(--brand)] border-l-[3px] border-l-[var(--brand)] border-y border-y-transparent border-r border-r-transparent"
+                  ? "bg-[#93c5fd] dark:bg-[#1d4ed8]/40 text-[#1e40af] dark:text-[#93c5fd] font-bold border-l-[4px] border-l-primary ring-1 ring-primary/50 shadow-md"
                   : "hover:bg-[var(--nav-hover)] text-muted-foreground border-l-[3px] border-transparent hover:text-foreground",
               )}
               onClick={() => handleSelectChannel(ch.channel)}
