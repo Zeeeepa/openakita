@@ -193,15 +193,7 @@ async def read_env():
         return {"env": {}, "raw": ""}
     content = env_path.read_bytes().decode("utf-8", errors="replace")
     env = _parse_env(content)
-    # Mask sensitive values for display (keys containing TOKEN, SECRET, PASSWORD, KEY)
-    masked = {}
-    sensitive_pattern = re.compile(r"(TOKEN|SECRET|PASSWORD|KEY|APIKEY)", re.IGNORECASE)
-    for k, v in env.items():
-        if sensitive_pattern.search(k) and v:
-            masked[k] = v[:4] + "***" + v[-2:] if len(v) > 6 else "***"
-        else:
-            masked[k] = v
-    return {"env": env, "masked": masked, "raw": content}
+    return {"env": env, "raw": content}
 
 
 @router.post("/api/config/env")

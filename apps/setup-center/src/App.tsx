@@ -208,8 +208,6 @@ export function App() {
   // ── Restart overlay state ──
   const [restartOverlay, setRestartOverlay] = useState<{ phase: "saving" | "restarting" | "waiting" | "done" | "fail" | "notRunning" } | null>(null);
 
-  // ── Module restart prompt ──
-  const [moduleRestartPrompt, setModuleRestartPrompt] = useState<string | null>(null);
 
   // ── Service conflict & version state ──
   const [conflictDialog, setConflictDialog] = useState<{ pid: number; version: string } | null>(null);
@@ -273,7 +271,7 @@ export function App() {
     [t],
   );
 
-  const [view, setView] = useState<"wizard" | "status" | "chat" | "skills" | "im" | "onboarding" | "modules" | "token_stats" | "mcp" | "scheduler" | "memory" | "identity" | "dashboard" | "agent_manager" | "agent_store" | "skill_store">((IS_WEB || IS_CAPACITOR) ? "chat" : "wizard");
+  const [view, setView] = useState<"wizard" | "status" | "chat" | "skills" | "im" | "onboarding" | "token_stats" | "mcp" | "scheduler" | "memory" | "identity" | "dashboard" | "agent_manager" | "agent_store" | "skill_store">((IS_WEB || IS_CAPACITOR) ? "chat" : "wizard");
   const [appInitializing, setAppInitializing] = useState(!(IS_WEB || IS_CAPACITOR));
   const [configExpanded, setConfigExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -328,11 +326,7 @@ export function App() {
 
   // ── Onboarding Wizard (首次安装引导) ──
   type OnboardingStep = "ob-welcome" | "ob-agreement" | "ob-llm" | "ob-im" | "ob-cli" | "ob-progress" | "ob-done";
-  type ModuleInfo = { id: string; name: string; description: string; installed: boolean; bundled: boolean; sizeMb: number; category: string };
   const [obStep, setObStep] = useState<OnboardingStep>("ob-welcome");
-  const [obModules, setObModules] = useState<ModuleInfo[]>([]);
-  /** 卸载因“拒绝访问”失败时，可先停止后端再卸载的待处理模块 */
-  const [moduleUninstallPending, setModuleUninstallPending] = useState<{ id: string; name: string } | null>(null);
   const [obInstallLog, setObInstallLog] = useState<string[]>([]);
   const [obInstalling, setObInstalling] = useState(false);
   const [obEnvCheck, setObEnvCheck] = useState<{
@@ -536,7 +530,7 @@ export function App() {
   const [compBaseUrlExpanded, setCompBaseUrlExpanded] = useState(false);
   const [sttBaseUrlExpanded, setSttBaseUrlExpanded] = useState(false);
   const [addEpMaxTokens, setAddEpMaxTokens] = useState(0);
-  const [addEpContextWindow, setAddEpContextWindow] = useState(200000);
+  const [addEpContextWindow, setAddEpContextWindow] = useState(30000);
   const [addEpTimeout, setAddEpTimeout] = useState(180);
   const [addEpRpmLimit, setAddEpRpmLimit] = useState(0);
   const [codingPlanMode, setCodingPlanMode] = useState(false);
@@ -737,7 +731,7 @@ export function App() {
                 model: String(e?.model || ""), api_key_env: String(e?.api_key_env || ""),
                 priority: Number(e?.priority || 1),
                 max_tokens: Number(e?.max_tokens ?? 0),
-                context_window: Number(e?.context_window || 200000),
+                context_window: Number(e?.context_window || 30000),
                 timeout: Number(e?.timeout || 180),
                 capabilities: Array.isArray(e?.capabilities) ? e.capabilities.map((x: any) => String(x)) : [],
                 enabled: e?.enabled !== false,
@@ -1448,13 +1442,13 @@ export function App() {
     if (codingPlanMode && selectedProvider.coding_plan_base_url) {
       setApiType((selectedProvider.coding_plan_api_type as "openai" | "anthropic") || "anthropic");
       if (!baseUrlTouched) setBaseUrl(selectedProvider.coding_plan_base_url);
-      setAddEpContextWindow(200000);
+      setAddEpContextWindow(30000);
       setAddEpMaxTokens((selectedProvider as ProviderInfo).default_max_tokens ?? 8192);
     } else {
       const t = (selectedProvider.api_type as "openai" | "anthropic") || "openai";
       setApiType(t);
       if (!baseUrlTouched) setBaseUrl(selectedProvider.default_base_url || "");
-      setAddEpContextWindow((selectedProvider as ProviderInfo).default_context_window ?? 200000);
+      setAddEpContextWindow((selectedProvider as ProviderInfo).default_context_window ?? 30000);
       setAddEpMaxTokens((selectedProvider as ProviderInfo).default_max_tokens ?? 0);
     }
     const suggested = selectedProvider.api_key_env_suggestion || envKeyFromSlug(selectedProvider.slug);
@@ -1695,7 +1689,7 @@ export function App() {
           model: String(e?.model || ""),
           priority: Number.isFinite(Number(e?.priority)) ? Number(e?.priority) : 999,
           max_tokens: Number.isFinite(Number(e?.max_tokens)) ? Number(e?.max_tokens) : 0,
-          context_window: Number.isFinite(Number(e?.context_window)) ? Number(e?.context_window) : 200000,
+          context_window: Number.isFinite(Number(e?.context_window)) ? Number(e?.context_window) : 30000,
           timeout: Number.isFinite(Number(e?.timeout)) ? Number(e?.timeout) : 180,
           capabilities: Array.isArray(e?.capabilities) ? e.capabilities.map((x: any) => String(x)) : [],
           rpm_limit: Number.isFinite(Number(e?.rpm_limit)) ? Number(e?.rpm_limit) : 0,
@@ -1730,7 +1724,7 @@ export function App() {
           model: String(e.model || ""),
           priority: Number.isFinite(Number(e.priority)) ? Number(e.priority) : 1,
           max_tokens: Number.isFinite(Number(e.max_tokens)) ? Number(e.max_tokens) : 2048,
-          context_window: Number.isFinite(Number(e.context_window)) ? Number(e.context_window) : 200000,
+          context_window: Number.isFinite(Number(e.context_window)) ? Number(e.context_window) : 30000,
           timeout: Number.isFinite(Number(e.timeout)) ? Number(e.timeout) : 30,
           capabilities: Array.isArray(e.capabilities) ? e.capabilities.map((x: any) => String(x)) : ["text"],
           note: e.note ? String(e.note) : null,
@@ -1939,6 +1933,85 @@ export function App() {
       return;
     }
     throw new Error(`写入配置失败：服务未运行且无本地工作区 (${relativePath})`);
+  }
+
+  // ── Tauri-local endpoint save/delete (fallback when HTTP API is unavailable) ──
+
+  function allocateUniqueEnvVar(
+    endpoint: Record<string, unknown>,
+    config: Record<string, unknown>,
+  ): string {
+    const used = new Set<string>();
+    for (const listKey of ["endpoints", "compiler_endpoints", "stt_endpoints"]) {
+      for (const ep of (config[listKey] as any[] || [])) {
+        if (ep?.api_key_env) used.add(ep.api_key_env);
+      }
+    }
+    const provider = String(endpoint.provider || "custom").toUpperCase().replace(/-/g, "_");
+    const baseName = `${provider}_API_KEY`;
+    if (!used.has(baseName)) return baseName;
+    for (let i = 2; i < 100; i++) {
+      const candidate = `${baseName}_${i}`;
+      if (!used.has(candidate)) return candidate;
+    }
+    return `${baseName}_${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  async function saveEndpointLocal(
+    endpoint: Record<string, unknown>,
+    apiKey: string | null,
+    endpointType: string,
+  ): Promise<{ endpoint: Record<string, unknown> }> {
+    let config: Record<string, unknown>;
+    try {
+      const raw = await readWorkspaceFile("data/llm_endpoints.json");
+      config = raw ? JSON.parse(raw) : {};
+    } catch {
+      config = {};
+    }
+
+    const name = String(endpoint.name || "");
+    const epList: any[] = (config[endpointType] as any[] || []);
+    const existing = epList.find((e: any) => e.name === name);
+
+    let envVar = "";
+    if (apiKey) {
+      envVar = existing?.api_key_env || (endpoint.api_key_env as string) || allocateUniqueEnvVar(endpoint, config);
+      if (IS_TAURI && currentWorkspaceId) {
+        await invoke("workspace_update_env", {
+          workspaceId: currentWorkspaceId,
+          entries: [{ key: envVar, value: apiKey }],
+        });
+      }
+      setEnvDraft((e) => envSet(e, envVar, apiKey));
+    } else {
+      envVar = existing?.api_key_env || (endpoint.api_key_env as string) || "";
+    }
+    endpoint.api_key_env = envVar;
+
+    if (existing) {
+      const idx = epList.indexOf(existing);
+      epList[idx] = { ...existing, ...endpoint };
+    } else {
+      epList.push(endpoint);
+    }
+    config[endpointType] = epList;
+
+    await writeWorkspaceFile("data/llm_endpoints.json", JSON.stringify(config, null, 2));
+    return { endpoint: { ...endpoint, api_key_env: envVar } };
+  }
+
+  async function deleteEndpointLocal(name: string, endpointType: string): Promise<void> {
+    let config: Record<string, unknown>;
+    try {
+      const raw = await readWorkspaceFile("data/llm_endpoints.json");
+      config = raw ? JSON.parse(raw) : {};
+    } catch {
+      config = {};
+    }
+    const epList: any[] = (config[endpointType] as any[] || []);
+    config[endpointType] = epList.filter((e: any) => e.name !== name);
+    await writeWorkspaceFile("data/llm_endpoints.json", JSON.stringify(config, null, 2));
   }
 
   /**
@@ -2219,30 +2292,33 @@ export function App() {
         capabilities: ["text"],
       };
 
-      const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          endpoint,
-          api_key: effectiveCompApiKeyValue || null,
-          endpoint_type: "compiler_endpoints",
-        }),
-      });
-      const data = await res.json();
-      if (data.status === "error" || data.status === "conflict") {
-        notifyError(data.error || "保存失败");
-        return false;
-      }
-
-      if (effectiveCompApiKeyValue && data.endpoint?.api_key_env) {
-        setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveCompApiKeyValue));
+      if (shouldUseHttpApi()) {
+        const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            endpoint,
+            api_key: effectiveCompApiKeyValue || null,
+            endpoint_type: "compiler_endpoints",
+          }),
+        });
+        const data = await res.json();
+        if (data.status === "error" || data.status === "conflict") {
+          notifyError(data.error || "保存失败");
+          return false;
+        }
+        if (effectiveCompApiKeyValue && data.endpoint?.api_key_env) {
+          setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveCompApiKeyValue));
+        }
+      } else {
+        await saveEndpointLocal(endpoint, effectiveCompApiKeyValue || null, "compiler_endpoints");
       }
 
       setCompilerModel("");
       setCompilerApiKeyValue("");
       setCompilerEndpointName("");
       setCompilerBaseUrl("");
-      notifySuccess(`编译端点 ${data.endpoint?.name || epName} 已保存`);
+      notifySuccess(`编译端点 ${epName} 已保存`);
       await loadSavedEndpoints();
       return true;
     } catch (e) {
@@ -2257,10 +2333,14 @@ export function App() {
     if (!currentWorkspaceId && dataMode !== "remote") return;
     const _busyId = notifyLoading("删除编译端点...");
     try {
-      await safeFetch(
-        `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(epName)}?endpoint_type=compiler_endpoints`,
-        { method: "DELETE" },
-      );
+      if (shouldUseHttpApi()) {
+        await safeFetch(
+          `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(epName)}?endpoint_type=compiler_endpoints`,
+          { method: "DELETE" },
+        );
+      } else {
+        await deleteEndpointLocal(epName, "compiler_endpoints");
+      }
       setSavedCompilerEndpoints((prev) => prev.filter((e) => e.name !== epName));
       notifySuccess(`编译端点 ${epName} 已删除`);
       loadSavedEndpoints().catch(() => {});
@@ -2311,23 +2391,26 @@ export function App() {
         capabilities: ["text"],
       };
 
-      const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          endpoint,
-          api_key: effectiveSttApiKeyValue || null,
-          endpoint_type: "stt_endpoints",
-        }),
-      });
-      const data = await res.json();
-      if (data.status === "error" || data.status === "conflict") {
-        notifyError(data.error || "保存失败");
-        return false;
-      }
-
-      if (effectiveSttApiKeyValue && data.endpoint?.api_key_env) {
-        setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveSttApiKeyValue));
+      if (shouldUseHttpApi()) {
+        const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            endpoint,
+            api_key: effectiveSttApiKeyValue || null,
+            endpoint_type: "stt_endpoints",
+          }),
+        });
+        const data = await res.json();
+        if (data.status === "error" || data.status === "conflict") {
+          notifyError(data.error || "保存失败");
+          return false;
+        }
+        if (effectiveSttApiKeyValue && data.endpoint?.api_key_env) {
+          setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveSttApiKeyValue));
+        }
+      } else {
+        await saveEndpointLocal(endpoint, effectiveSttApiKeyValue || null, "stt_endpoints");
       }
 
       setSttModel("");
@@ -2335,7 +2418,7 @@ export function App() {
       setSttEndpointName("");
       setSttBaseUrl("");
       setSttModels([]);
-      notifySuccess(`STT 端点 ${data.endpoint?.name || epName} 已保存`);
+      notifySuccess(`STT 端点 ${epName} 已保存`);
       await loadSavedEndpoints();
       return true;
     } catch (e) {
@@ -2350,10 +2433,14 @@ export function App() {
     if (!currentWorkspaceId && dataMode !== "remote") return;
     const _busyId = notifyLoading("删除 STT 端点...");
     try {
-      await safeFetch(
-        `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(epName)}?endpoint_type=stt_endpoints`,
-        { method: "DELETE" },
-      );
+      if (shouldUseHttpApi()) {
+        await safeFetch(
+          `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(epName)}?endpoint_type=stt_endpoints`,
+          { method: "DELETE" },
+        );
+      } else {
+        await deleteEndpointLocal(epName, "stt_endpoints");
+      }
       setSavedSttEndpoints((prev) => prev.filter((e) => e.name !== epName));
       notifySuccess(`STT 端点 ${epName} 已删除`);
       loadSavedEndpoints().catch(() => {});
@@ -2433,7 +2520,7 @@ export function App() {
       modelId: ep.model || "",
       caps: Array.isArray(ep.capabilities) && ep.capabilities.length ? ep.capabilities : ["text"],
       maxTokens: typeof ep.max_tokens === "number" ? ep.max_tokens : 0,
-      contextWindow: typeof ep.context_window === "number" ? ep.context_window : 200000,
+      contextWindow: typeof ep.context_window === "number" ? ep.context_window : 30000,
       timeout: typeof ep.timeout === "number" ? ep.timeout : 180,
       rpmLimit: typeof ep.rpm_limit === "number" ? ep.rpm_limit : 0,
       pricingTiers: Array.isArray(ep.pricing_tiers) ? ep.pricing_tiers.map((t: any) => ({
@@ -2529,7 +2616,7 @@ export function App() {
         model: editDraft.modelId.trim(),
         priority: normalizePriority(editDraft.priority, 1),
         max_tokens: editDraft.maxTokens ?? 0,
-        context_window: editDraft.contextWindow ?? 200000,
+        context_window: editDraft.contextWindow ?? 30000,
         timeout: editDraft.timeout ?? 180,
         rpm_limit: editDraft.rpmLimit ?? 0,
         capabilities: editDraft.caps?.length ? editDraft.caps : ["text"],
@@ -2541,30 +2628,35 @@ export function App() {
         endpoint.pricing_tiers = validTiers;
       }
 
-      if (nameChanged) {
-        await safeFetch(
-          `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(editingOriginalName)}?endpoint_type=endpoints`,
-          { method: "DELETE" },
-        );
-      }
-
-      const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          endpoint,
-          api_key: editDraft.apiKeyValue.trim() || null,
-          endpoint_type: "endpoints",
-        }),
-      });
-      const data = await res.json();
-      if (data.status === "conflict" || data.status === "error") {
-        notifyError(data.error || "保存失败");
-        return;
-      }
-
-      if (editDraft.apiKeyValue.trim() && data.endpoint?.api_key_env) {
-        setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, editDraft.apiKeyValue.trim()));
+      if (shouldUseHttpApi()) {
+        if (nameChanged) {
+          await safeFetch(
+            `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(editingOriginalName)}?endpoint_type=endpoints`,
+            { method: "DELETE" },
+          );
+        }
+        const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            endpoint,
+            api_key: editDraft.apiKeyValue.trim() || null,
+            endpoint_type: "endpoints",
+          }),
+        });
+        const data = await res.json();
+        if (data.status === "conflict" || data.status === "error") {
+          notifyError(data.error || "保存失败");
+          return;
+        }
+        if (editDraft.apiKeyValue.trim() && data.endpoint?.api_key_env) {
+          setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, editDraft.apiKeyValue.trim()));
+        }
+      } else {
+        if (nameChanged) {
+          await deleteEndpointLocal(editingOriginalName, "endpoints");
+        }
+        await saveEndpointLocal(endpoint, editDraft.apiKeyValue.trim() || null, "endpoints");
       }
 
       notifySuccess("端点已更新");
@@ -2629,27 +2721,30 @@ export function App() {
         endpoint.extra_params = { enable_thinking: true };
       }
 
-      const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          endpoint,
-          api_key: effectiveApiKeyValue || null,
-          endpoint_type: "endpoints",
-        }),
-      });
-      const data = await res.json();
-      if (data.status === "conflict") {
-        notifyError(data.error || "配置已被其他会话修改，请刷新后重试");
-        return false;
-      }
-      if (data.status === "error") {
-        notifyError(data.error || "保存失败");
-        return false;
-      }
-
-      if (effectiveApiKeyValue && data.endpoint?.api_key_env) {
-        setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveApiKeyValue));
+      if (shouldUseHttpApi()) {
+        const res = await safeFetch(`${httpApiBase()}/api/config/save-endpoint`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            endpoint,
+            api_key: effectiveApiKeyValue || null,
+            endpoint_type: "endpoints",
+          }),
+        });
+        const data = await res.json();
+        if (data.status === "conflict") {
+          notifyError(data.error || "配置已被其他会话修改，请刷新后重试");
+          return false;
+        }
+        if (data.status === "error") {
+          notifyError(data.error || "保存失败");
+          return false;
+        }
+        if (effectiveApiKeyValue && data.endpoint?.api_key_env) {
+          setEnvDraft((e) => envSet(e, data.endpoint.api_key_env, effectiveApiKeyValue));
+        }
+      } else {
+        await saveEndpointLocal(endpoint, effectiveApiKeyValue || null, "endpoints");
       }
 
       notifySuccess(
@@ -2672,10 +2767,14 @@ export function App() {
     if (!currentWorkspaceId && dataMode !== "remote") return;
     const _busyId = notifyLoading("删除端点...");
     try {
-      await safeFetch(
-        `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(name)}?endpoint_type=endpoints`,
-        { method: "DELETE" },
-      );
+      if (shouldUseHttpApi()) {
+        await safeFetch(
+          `${httpApiBase()}/api/config/endpoint/${encodeURIComponent(name)}?endpoint_type=endpoints`,
+          { method: "DELETE" },
+        );
+      } else {
+        await deleteEndpointLocal(name, "endpoints");
+      }
       setSavedEndpoints((prev) => prev.filter((e) => e.name !== name));
       notifySuccess(`已删除端点：${name}`);
       loadSavedEndpoints().catch(() => {});
@@ -4171,7 +4270,7 @@ export function App() {
     setEndpointPriority(1);
     setCodingPlanMode(false);
     setAddEpMaxTokens(0);
-    setAddEpContextWindow(200000);
+    setAddEpContextWindow(30000);
     setAddEpTimeout(180);
     setAddEpRpmLimit(0);
     if (providers.length === 0) doLoadProviders();
@@ -4463,7 +4562,13 @@ export function App() {
                   </div>
                   <div className="space-y-1.5">
                     <Label>{t("llm.advContextWindow")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.advContextWindowHint")}</span></Label>
-                    <Input type="number" min={1024} value={addEpContextWindow} onChange={(e) => setAddEpContextWindow(Math.max(1024, parseInt(e.target.value) || 200000))} />
+                    <Input type="number" min={0} value={addEpContextWindow ? Math.round(addEpContextWindow / 1000) : ""} onChange={(e) => setAddEpContextWindow((parseInt(e.target.value) || 0) * 1000)} />
+                    {addEpContextWindow > 0 && addEpContextWindow < 30000 && (
+                      <p className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                        <AlertTriangle className="size-3 shrink-0" />
+                        {t("llm.advContextWindowWarn")}
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label>{t("llm.advTimeout")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.advTimeoutHint")}</span></Label>
@@ -4651,7 +4756,13 @@ export function App() {
                   </div>
                   <div className="space-y-1.5">
                     <Label>{t("llm.advContextWindow")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.advContextWindowHint")}</span></Label>
-                    <Input type="number" min={1024} value={editDraft.contextWindow} onChange={(e) => setEditDraft({ ...editDraft, contextWindow: Math.max(1024, parseInt(e.target.value) || 200000) })} />
+                    <Input type="number" min={0} value={editDraft.contextWindow ? Math.round(editDraft.contextWindow / 1000) : ""} onChange={(e) => setEditDraft({ ...editDraft, contextWindow: (parseInt(e.target.value) || 0) * 1000 })} />
+                    {editDraft.contextWindow > 0 && editDraft.contextWindow < 30000 && (
+                      <p className="flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                        <AlertTriangle className="size-3 shrink-0" />
+                        {t("llm.advContextWindowWarn")}
+                      </p>
+                    )}
                   </div>
                   <div className="space-y-1.5">
                     <Label>{t("llm.advTimeout")} <span className="text-[11px] font-normal text-muted-foreground/70">{t("llm.advTimeoutHint")}</span></Label>
@@ -6668,16 +6779,6 @@ export function App() {
   }
 
   // ── Onboarding Wizard 渲染 ──
-  async function obLoadModules() {
-    if (!IS_TAURI) return;
-    try {
-      const modules = await invoke<ModuleInfo[]>("detect_modules");
-      setObModules(modules);
-
-    } catch (e) {
-      logger.warn("App", "detect_modules failed", { error: String(e) });
-    }
-  }
 
   async function obLoadEnvCheck() {
     if (!IS_TAURI) return;
@@ -6887,46 +6988,60 @@ export function App() {
       }
 
       // ── STEP: service-start ──
+      // The early-start in ob-welcome may have already launched the backend.
+      // Probe first to avoid a redundant start (which is harmless but slow).
       updateTask("service-start", { status: "running" });
       logTask("启动后端服务", "running");
-      log(t("onboarding.progress.startingService"));
       const effectiveVenv = venvDir || (info ? joinPath(info.openakitaRootDir, "venv") : "");
       let httpReady = false;
       try {
-        await invoke("openakita_service_start", { venvDir: effectiveVenv, workspaceId: activeWsId });
-        log(t("onboarding.progress.serviceStarted"));
-        updateTask("service-start", { status: "done" });
-        logTask("启动后端服务", "done");
+        const earlyProbe = await fetch("http://127.0.0.1:18900/api/health", { signal: AbortSignal.timeout(3000) }).then(r => r.ok).catch(() => false);
+        if (earlyProbe) {
+          log("✓ 后端已在运行（由 ob-welcome 提前启动）");
+          setServiceStatus({ running: true, pid: null, pidFile: "" });
+          setDataMode("remote");
+          httpReady = true;
+          updateTask("service-start", { status: "done", detail: "已在运行" });
+          logTask("启动后端服务", "done", "已在运行");
+          updateTask("http-wait", { status: "done", detail: "已就绪" });
+          logTask("等待 HTTP 服务就绪", "done", "已就绪");
+        } else {
+          log(t("onboarding.progress.startingService"));
+          await invoke("openakita_service_start", { venvDir: effectiveVenv, workspaceId: activeWsId });
+          log(t("onboarding.progress.serviceStarted"));
+          updateTask("service-start", { status: "done" });
+          logTask("启动后端服务", "done");
 
-        // ── STEP: http-wait ──
-        updateTask("http-wait", { status: "running" });
-        logTask("等待 HTTP 服务就绪", "running");
-        log("等待 HTTP 服务就绪...");
-        for (let i = 0; i < 20; i++) {
-          await new Promise(r => setTimeout(r, 2000));
-          updateTask("http-wait", { detail: `已等待 ${(i + 1) * 2}s...` });
-          if (i > 0 && obLogPath) {
-            const now = new Date();
-            const ts = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
-            invoke("append_onboarding_log", { logPath: obLogPath, line: `[${ts}] [任务] 等待 HTTP 服务就绪: 已等待 ${(i + 1) * 2}s...` }).catch(() => {});
-          }
-          try {
-            const res = await fetch("http://127.0.0.1:18900/api/health", { signal: AbortSignal.timeout(3000) });
-            if (res.ok) {
-              log("✓ HTTP 服务已就绪");
-              setServiceStatus({ running: true, pid: null, pidFile: "" });
-              httpReady = true;
-              updateTask("http-wait", { status: "done", detail: `${(i + 1) * 2}s` });
-              logTask("等待 HTTP 服务就绪", "done", `${(i + 1) * 2}s`);
-              break;
+          // ── STEP: http-wait ──
+          updateTask("http-wait", { status: "running" });
+          logTask("等待 HTTP 服务就绪", "running");
+          log("等待 HTTP 服务就绪...");
+          for (let i = 0; i < 20; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            updateTask("http-wait", { detail: `已等待 ${(i + 1) * 2}s...` });
+            if (i > 0 && obLogPath) {
+              const now = new Date();
+              const ts = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`;
+              invoke("append_onboarding_log", { logPath: obLogPath, line: `[${ts}] [任务] 等待 HTTP 服务就绪: 已等待 ${(i + 1) * 2}s...` }).catch(() => {});
             }
-          } catch { /* not ready yet */ }
-          if (i % 5 === 4) log(`仍在等待 HTTP 服务启动... (${(i + 1) * 2}s)`);
-        }
-        if (!httpReady) {
-          log("⚠ HTTP 服务尚未就绪，可进入主页面后手动刷新");
-          updateTask("http-wait", { status: "error", detail: "超时" });
-          logTask("等待 HTTP 服务就绪", "error", "超时");
+            try {
+              const res = await fetch("http://127.0.0.1:18900/api/health", { signal: AbortSignal.timeout(3000) });
+              if (res.ok) {
+                log("✓ HTTP 服务已就绪");
+                setServiceStatus({ running: true, pid: null, pidFile: "" });
+                httpReady = true;
+                updateTask("http-wait", { status: "done", detail: `${(i + 1) * 2}s` });
+                logTask("等待 HTTP 服务就绪", "done", `${(i + 1) * 2}s`);
+                break;
+              }
+            } catch { /* not ready yet */ }
+            if (i % 5 === 4) log(`仍在等待 HTTP 服务启动... (${(i + 1) * 2}s)`);
+          }
+          if (!httpReady) {
+            log("⚠ HTTP 服务尚未就绪，可进入主页面后手动刷新");
+            updateTask("http-wait", { status: "error", detail: "超时" });
+            logTask("等待 HTTP 服务就绪", "error", "超时");
+          }
         }
       } catch (e) {
         const errStr = String(e);
@@ -7263,6 +7378,7 @@ export function App() {
                 size="lg"
                 className="mt-2 px-10 rounded-xl text-[15px]"
                 onClick={async () => {
+                  let earlyStartWsId = currentWorkspaceId || "";
                   try {
                     const wsList = await invoke<WorkspaceSummary[]>("list_workspaces");
                     if (!wsList.length) {
@@ -7271,15 +7387,48 @@ export function App() {
                       await invoke("set_current_workspace", { id: wsId });
                       setCurrentWorkspaceId(wsId);
                       setWorkspaces([{ id: wsId, name: t("onboarding.defaultWorkspace"), path: "", isCurrent: true }]);
+                      earlyStartWsId = wsId;
                     } else {
                       setWorkspaces(wsList);
                       if (!currentWorkspaceId && wsList.length > 0) {
                         setCurrentWorkspaceId(wsList[0].id);
                       }
+                      earlyStartWsId = currentWorkspaceId || wsList[0]?.id || "";
                     }
                   } catch (e) {
                     logger.warn("App", "ob: create default workspace failed", { error: String(e) });
                   }
+
+                  // Kick off backend startup in background so HTTP API is
+                  // likely ready by the time the user reaches ob-llm.
+                  if (IS_TAURI && earlyStartWsId) {
+                    const wsId = earlyStartWsId;
+                    const effectiveVenv = venvDir || (info ? joinPath(info.openakitaRootDir, "venv") : "");
+                    (async () => {
+                      try {
+                        const backendInfo = await invoke<{
+                          bundled: boolean; venvReady: boolean; exePath: string;
+                          bundledChecked: string; venvChecked: string;
+                        }>("check_backend_availability", { venvDir: effectiveVenv });
+                        if (!backendInfo.bundled && !backendInfo.venvReady) return;
+                        await invoke("openakita_service_start", { venvDir: effectiveVenv, workspaceId: wsId });
+                        for (let i = 0; i < 15; i++) {
+                          await new Promise(r => setTimeout(r, 2000));
+                          try {
+                            const res = await fetch("http://127.0.0.1:18900/api/health", { signal: AbortSignal.timeout(3000) });
+                            if (res.ok) {
+                              setServiceStatus({ running: true, pid: null, pidFile: "" });
+                              setDataMode("remote");
+                              break;
+                            }
+                          } catch { /* not ready yet */ }
+                        }
+                      } catch (e) {
+                        logger.warn("App", "ob: early backend start failed, will retry in ob-progress", { error: String(e) });
+                      }
+                    })();
+                  }
+
                   setObStep("ob-agreement");
                 }}
               >
@@ -7384,9 +7533,6 @@ export function App() {
               <div className="obFooterBtns">
                 <Button variant="outline" onClick={() => setObStep("ob-llm")}>{t("config.prev")}</Button>
                 <Button onClick={() => setObStep("ob-cli")}>{t("config.next")}</Button>
-                <Button variant="secondary" onClick={() => setObStep("ob-cli")} title={t("onboarding.im.skip")}>
-                  {t("onboarding.im.skipShort") || t("onboarding.im.skip")}
-                </Button>
               </div>
             </div>
           </div>
@@ -7406,7 +7552,7 @@ export function App() {
                   <Checkbox checked={obCliOpenakita} onCheckedChange={() => setObCliOpenakita(!obCliOpenakita)} />
                   <div className="obModuleInfo">
                     <strong style={{ fontFamily: "monospace", fontSize: 15 }}>openakita</strong>
-                    <span className="obModuleDesc">完整命令名称</span>
+                    <span className="obModuleDesc">{t("onboarding.system.cmdFull")}</span>
                   </div>
                 </label>
 
@@ -7414,16 +7560,16 @@ export function App() {
                   <Checkbox checked={obCliOa} onCheckedChange={() => setObCliOa(!obCliOa)} />
                   <div className="obModuleInfo">
                     <strong style={{ fontFamily: "monospace", fontSize: 15 }}>oa</strong>
-                    <span className="obModuleDesc">简短别名，推荐日常使用</span>
+                    <span className="obModuleDesc">{t("onboarding.system.cmdShort")}</span>
                   </div>
-                  <Badge variant="secondary" className="obModuleBadge obModuleBadgeRec">推荐</Badge>
+                  <Badge variant="secondary" className="obModuleBadge obModuleBadgeRec">{t("onboarding.system.recommended")}</Badge>
                 </label>
 
                 <label className="obModuleItem" data-checked={obCliAddToPath || undefined}>
                   <Checkbox checked={obCliAddToPath} onCheckedChange={() => setObCliAddToPath(!obCliAddToPath)} />
                   <div className="obModuleInfo">
-                    <strong>添加到系统 PATH</strong>
-                    <span className="obModuleDesc">新打开的终端中可直接输入命令名运行，无需完整路径</span>
+                    <strong>{t("onboarding.system.addToPath")}</strong>
+                    <span className="obModuleDesc">{t("onboarding.system.addToPathDesc")}</span>
                   </div>
                 </label>
 
@@ -7442,17 +7588,17 @@ export function App() {
               {(obCliOpenakita || obCliOa) && (
                 <Card className="mt-4">
                   <CardContent className="py-4 px-5 space-y-2.5">
-                    <p className="text-[13px] font-semibold text-muted-foreground">安装后可使用的命令示例</p>
+                    <p className="text-[13px] font-semibold text-muted-foreground">{t("onboarding.system.cmdExamples")}</p>
                     <div className="bg-slate-900 rounded-lg px-4 py-3.5 font-mono text-[13px] leading-[1.9] text-slate-200 overflow-x-auto">
                       {obCliOa && <>
-                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> serve <span className="text-slate-400 ml-6"># 启动后端服务</span></div>
-                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> status <span className="text-slate-400 ml-4"># 查看运行状态</span></div>
-                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> run <span className="text-slate-400 ml-9"># 单次对话</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> serve <span className="text-slate-400 ml-6">{t("onboarding.system.commentServe")}</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> status <span className="text-slate-400 ml-4">{t("onboarding.system.commentStatus")}</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-blue-300">oa</span> run <span className="text-slate-400 ml-9">{t("onboarding.system.commentRun")}</span></div>
                       </>}
                       {obCliOa && obCliOpenakita && <div className="h-1" />}
                       {obCliOpenakita && <>
-                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> init <span className="text-slate-400 ml-2"># 初始化工作区</span></div>
-                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> serve <span className="text-slate-400"># 启动后端服务</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> init <span className="text-slate-400 ml-2">{t("onboarding.system.commentInit")}</span></div>
+                        <div><span className="text-slate-400">$</span> <span className="text-indigo-300">openakita</span> serve <span className="text-slate-400">{t("onboarding.system.commentServe")}</span></div>
                       </>}
                     </div>
                   </CardContent>
@@ -7464,7 +7610,7 @@ export function App() {
               <div className="obFooterBtns">
                 <Button variant="outline" onClick={() => setObStep("ob-im")}>{t("config.prev")}</Button>
                 <Button onClick={() => { setObStep("ob-progress"); obRunSetup(); }}>
-                  {t("onboarding.modules.startInstall")}
+                  {t("onboarding.system.startInstall")}
                 </Button>
               </div>
             </div>
@@ -7489,7 +7635,7 @@ export function App() {
             <div className="obContent" style={{ display: "flex", flexDirection: "column", gap: 0, flex: 1, minHeight: 0 }}>
               <h2 className="obStepTitle">{t("onboarding.progress.title")}</h2>
               <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 12px", lineHeight: 1.5 }}>
-                模块与运行环境体积较大，安装过程中请耐心等待，请勿关闭本窗口。
+                {t("onboarding.progress.patience")}
               </p>
 
               {/* ── 任务进度列表 ── */}
@@ -7524,7 +7670,7 @@ export function App() {
                       )}
                     </div>
                     {task.status === "running" && (
-                      <span style={{ fontSize: 12, color: "#3b82f6", flexShrink: 0, fontWeight: 500 }}>进行中</span>
+                      <span style={{ fontSize: 12, color: "#3b82f6", flexShrink: 0, fontWeight: 500 }}>{t("onboarding.progress.inProgress")}</span>
                     )}
                   </div>
                 ))}
@@ -7541,7 +7687,7 @@ export function App() {
                 ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}
               >
                 {obDetailLog.length === 0 && (
-                  <div style={{ color: "#64748b" }}>等待任务开始...</div>
+                  <div style={{ color: "#64748b" }}>{t("onboarding.progress.waitingStart")}</div>
                 )}
                 {obDetailLog.map((line, i) => (
                   <div key={i} style={{
@@ -7754,137 +7900,6 @@ export function App() {
           apiBaseUrl={apiBaseUrl}
           visible={view === "skill_store"}
         />
-      );
-    }
-    if (view === "modules") {
-      return (
-        <div>
-          {_disableToggle("modules", "模块管理")}
-          {disabledViews.includes("modules") ? (
-            <div className="card" style={{ opacity: 0.5, textAlign: "center", padding: 40 }}>
-              <p style={{ color: "#94a3b8", fontSize: 15 }}>此模块已禁用，点击上方开关启用</p>
-            </div>
-          ) : (
-        <div className="card">
-          <h2 className="cardTitle">{t("modules.title")}</h2>
-          <p style={{ color: "var(--muted)", fontSize: 13, marginBottom: 16 }}>{t("modules.desc")}</p>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16, padding: "10px 14px", background: "var(--warn-bg, #fffbeb)", borderRadius: 8, border: "1px solid var(--warn-border, #fde68a)", fontSize: 13, color: "var(--warn, #92400e)", lineHeight: 1.6 }}>
-            <span style={{ fontSize: 16, flexShrink: 0, marginTop: 1 }}>⚠️</span>
-            <span>{t("modules.legacyNotice")}</span>
-          </div>
-          {moduleUninstallPending && currentWorkspaceId && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, padding: "10px 12px", background: "#fef2f2", borderRadius: 8, border: "1px solid #fecaca" }}>
-              <span style={{ flex: 1, fontSize: 13 }}>{t("modules.uninstallFailInUse")}</span>
-              <button
-                type="button"
-                className="btnPrimary btnSmall"
-                disabled={!!busy}
-                onClick={async () => {
-                  const { id, name } = moduleUninstallPending;
-                  if (!IS_TAURI) { notifyError("模块管理仅限桌面端"); return; }
-                  const _b = notifyLoading(t("status.stopping"));
-                  try {
-                    const ss = await invoke<{ running: boolean; pid: number | null; pidFile: string }>("openakita_service_stop", { workspaceId: currentWorkspaceId });
-                    setServiceStatus(ss);
-                    await new Promise((r) => setTimeout(r, 1500));
-                    await invoke("uninstall_module", { moduleId: id });
-                    notifySuccess(t("modules.uninstalled", { name }));
-                    setModuleUninstallPending(null);
-                    obLoadModules();
-                  } catch (e) {
-                    notifyError(String(e));
-                  } finally {
-                    dismissLoading(_b);
-                  }
-                }}
-              >
-                {t("modules.stopAndUninstall")}
-              </button>
-              <button type="button" className="btnSmall" onClick={() => { setModuleUninstallPending(null); }}>{t("common.cancel")}</button>
-            </div>
-          )}
-          <div className="obModuleList">
-            {obModules.map((m) => (
-              <div key={m.id} className={`obModuleItem ${m.installed || m.bundled ? "obModuleInstalled" : ""}`}>
-                <div className="obModuleInfo" style={{ flex: 1 }}>
-                  <strong>{m.name}</strong>
-                  <span className="obModuleDesc">{m.description}</span>
-                  <span className="obModuleSize">~{m.sizeMb} MB</span>
-                </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  {(m.installed || m.bundled) ? (
-                    <>
-                      <span className="obModuleBadge">{t("modules.installed")}</span>
-                      <button
-                        className="btnSmall"
-                        style={{ color: "#ef4444" }}
-                        onClick={async () => {
-                          if (!IS_TAURI) return;
-                          const doUninstall = async () => {
-                            await invoke("uninstall_module", { moduleId: m.id });
-                            notifySuccess(t("modules.uninstalled", { name: m.name }));
-                            obLoadModules();
-                            if (serviceStatus?.running) {
-                              setModuleRestartPrompt(m.name);
-                            }
-                          };
-                          const _b = notifyLoading(t("modules.uninstalling", { name: m.name }));
-                          try {
-                            await doUninstall();
-                          } catch (e) {
-                            const msg = String(e);
-                            const isAccessDenied = /拒绝访问|Access denied|os error 5/i.test(msg);
-                            if (isAccessDenied && serviceStatus?.running && currentWorkspaceId) {
-                              notifyError(t("modules.uninstallFailInUse"));
-                              setModuleUninstallPending({ id: m.id, name: m.name });
-                              return;
-                            }
-                            notifyError(msg);
-                          } finally {
-                            dismissLoading(_b);
-                          }
-                        }}
-                        disabled={m.bundled || !!busy}
-                        title={m.bundled ? t("modules.bundledCannotUninstall") : t("modules.uninstall")}
-                      >
-                        {t("modules.uninstall")}
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      className="btnPrimary btnSmall"
-                      onClick={async () => {
-                        if (!IS_TAURI) return;
-                        const _b = notifyLoading(t("modules.installing", { name: m.name }));
-                        try {
-                          await invoke("install_module", { moduleId: m.id, mirror: null });
-                          notifySuccess(t("modules.installSuccess", { name: m.name }));
-                          obLoadModules();
-                          if (serviceStatus?.running) {
-                            setModuleRestartPrompt(m.name);
-                          }
-                        } catch (e) {
-                          notifyError(String(e));
-                        } finally {
-                          dismissLoading(_b);
-                        }
-                      }}
-                      disabled={!!busy}
-                    >
-                      {t("modules.install")}
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {obModules.length === 0 && <p style={{ color: "#94a3b8" }}>{t("modules.loading")}</p>}
-          </div>
-          <button className="btnSmall" style={{ marginTop: 16 }} onClick={obLoadModules} disabled={!!busy}>
-            {t("modules.refresh")}
-          </button>
-        </div>
-          )}
-        </div>
       );
     }
     switch (stepId) {
@@ -8269,24 +8284,6 @@ export function App() {
         )}
         <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-        {/* ── Module restart prompt ── */}
-        {moduleRestartPrompt && (
-          <ModalOverlay onClose={() => setModuleRestartPrompt(null)}>
-            <div className="modalContent" style={{ maxWidth: 400, padding: "28px 24px", borderRadius: 16 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>{t("modules.restartTitle")}</div>
-              <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 20, lineHeight: 1.6 }}>
-                {t("modules.restartDesc", { name: moduleRestartPrompt })}
-              </div>
-              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-                <button className="btnSmall" onClick={() => setModuleRestartPrompt(null)}>{t("modules.restartLater")}</button>
-                <button className="btnPrimary btnSmall" onClick={async () => {
-                  setModuleRestartPrompt(null);
-                  await applyAndRestart([]);
-                }}>{t("modules.restartNow")}</button>
-              </div>
-            </div>
-          </ModalOverlay>
-        )}
 
         {/* ── Service conflict dialog ── */}
         {conflictDialog && (

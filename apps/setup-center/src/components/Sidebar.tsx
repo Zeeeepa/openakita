@@ -10,7 +10,7 @@ import {
 } from "../icons";
 import logoUrl from "../assets/logo.png";
 
-type ViewId = "wizard" | "status" | "chat" | "skills" | "im" | "onboarding" | "modules" | "token_stats" | "mcp" | "scheduler" | "memory" | "identity" | "dashboard" | "agent_manager" | "agent_store" | "skill_store";
+type ViewId = "wizard" | "status" | "chat" | "skills" | "im" | "onboarding" | "token_stats" | "mcp" | "scheduler" | "memory" | "identity" | "dashboard" | "agent_manager" | "agent_store" | "skill_store";
 
 export type SidebarProps = {
   collapsed: boolean;
