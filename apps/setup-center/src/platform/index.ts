@@ -3,8 +3,8 @@
 // Tauri-specific modules are loaded via dynamic import() so they are never
 // bundled into the web build and never evaluated when running in a browser.
 
-import { IS_TAURI, IS_WEB, IS_CAPACITOR, IS_LOCAL_WEB } from "./detect";
-export { IS_TAURI, IS_WEB, IS_CAPACITOR, IS_LOCAL_WEB };
+import { IS_TAURI, IS_WEB, IS_CAPACITOR, IS_LOCAL_WEB, IS_MOBILE_BROWSER } from "./detect";
+export { IS_TAURI, IS_WEB, IS_CAPACITOR, IS_LOCAL_WEB, IS_MOBILE_BROWSER };
 
 // ---------------------------------------------------------------------------
 // Asset protocol: serve local files directly from disk (desktop only)

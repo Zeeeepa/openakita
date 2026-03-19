@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { setThemePref } from "../theme";
 import type { Theme } from "../theme";
-import { invoke, downloadFile, openFileWithDefault, showInFolder, readFileBase64, onDragDrop, IS_TAURI, IS_WEB, onWsEvent, logger, getAssetUrl } from "../platform";
+import { invoke, downloadFile, openFileWithDefault, showInFolder, readFileBase64, onDragDrop, IS_TAURI, IS_WEB, IS_MOBILE_BROWSER, onWsEvent, logger, getAssetUrl } from "../platform";
 import { getAccessToken } from "../platform/auth";
 import { safeFetch } from "../providers";
 import type {
@@ -1923,17 +1923,17 @@ export function ChatView({
   }, [flushCurrentConversationToStorage]);
 
   // ── APP 后台恢复：中断已断开的 SSE 流 ──
-  // Tauri WebView (macOS WKWebView / Windows WebView2) kills HTTP streams
-  // when the window is in the background, so we need to proactively abort and
-  // let the error handler clean up.  Regular browsers keep fetch streams alive
-  // across tab switches / minimize, so aborting would unnecessarily terminate
-  // a perfectly healthy response — skip for IS_WEB.
+  // Tauri / Capacitor / mobile browsers kill HTTP streams when the app/tab is
+  // in the background.  Desktop browsers keep fetch streams alive across tab
+  // switches, so we only skip the abort for desktop web.
+  // Abort reason "app_resumed" tells the catch handler to attempt recovery from
+  // backend session history instead of marking the conversation as user-cancelled.
   useEffect(() => {
-    if (IS_WEB) return;
+    if (IS_WEB && !IS_MOBILE_BROWSER) return;
     const handler = () => {
       for (const [convId, ctx] of streamContexts.current) {
         if (!ctx.isStreaming) continue;
-        ctx.abort.abort();
+        ctx.abort.abort("app_resumed");
         logger.warn("Chat", "SSE stream aborted after app resume", { convId });
       }
     };
@@ -3342,37 +3342,48 @@ export function ChatView({
         }
       }
     } catch (e: unknown) {
-      // Only treat as user-initiated abort when OUR AbortController was triggered.
-      // DOMException "AbortError" can also originate from the browser itself
-      // (page lifecycle freeze, tab discard, memory pressure) and must NOT be
-      // conflated with explicit user cancellation.
-      if (abort.signal.aborted) {
+      // Distinguish three abort scenarios:
+      // 1. User clicked stop → abort.signal.aborted && reason !== "app_resumed"
+      // 2. App resumed from background → abort.signal.reason === "app_resumed"
+      // 3. Browser/OS killed connection → DOMException AbortError without our signal
+      const isOurAbort = abort.signal.aborted;
+      const isAppResumeAbort = isOurAbort && abort.signal.reason === "app_resumed";
+      const isUserStop = isOurAbort && !isAppResumeAbort;
+
+      if (isUserStop) {
         updateMessages((prev) => prev.map((m) =>
           m.id === assistantMsg.id ? { ...m, content: m.content || "（已中止）", streaming: false } : m
         ));
       } else {
-        const isBrowserAbort =
-          (e instanceof DOMException && e.name === "AbortError") ||
-          (e instanceof Error && e.name === "AbortError");
-
-        if (isBrowserAbort) {
-          // Browser killed the connection (tab frozen / discarded, etc.)
-          // Preserve whatever content we already received — don't overwrite it.
+        if (isAppResumeAbort) {
+          // App returned from background — the stream is dead but the backend may
+          // still be running.  Preserve whatever content we already received and
+          // attempt recovery below.
           updateMessages((prev) => prev.map((m) =>
             m.id === assistantMsg.id ? { ...m, streaming: false } : m
           ));
         } else {
-          const errMsg = e instanceof Error ? e.message : String(e);
-          let guidance = t("chat.backendServiceHint");
-          try {
-            const healthRes = await fetch(`${apiBase}/api/health`, { signal: AbortSignal.timeout(2000) });
-            if (healthRes.ok) {
-              guidance = t("chat.backendOnlineUpstreamHint");
-            }
-          } catch { /* health probe failed -> keep backend guidance */ }
-          updateMessages((prev) => prev.map((m) =>
-            m.id === assistantMsg.id ? { ...m, content: m.content || `连接失败：${errMsg}\n\n${guidance}`, streaming: false } : m
-          ));
+          const isBrowserAbort =
+            (e instanceof DOMException && e.name === "AbortError") ||
+            (e instanceof Error && e.name === "AbortError");
+
+          if (isBrowserAbort) {
+            updateMessages((prev) => prev.map((m) =>
+              m.id === assistantMsg.id ? { ...m, streaming: false } : m
+            ));
+          } else {
+            const errMsg = e instanceof Error ? e.message : String(e);
+            let guidance = t("chat.backendServiceHint");
+            try {
+              const healthRes = await fetch(`${apiBase}/api/health`, { signal: AbortSignal.timeout(2000) });
+              if (healthRes.ok) {
+                guidance = t("chat.backendOnlineUpstreamHint");
+              }
+            } catch { /* health probe failed -> keep backend guidance */ }
+            updateMessages((prev) => prev.map((m) =>
+              m.id === assistantMsg.id ? { ...m, content: m.content || `连接失败：${errMsg}\n\n${guidance}`, streaming: false } : m
+            ));
+          }
         }
 
         // Fire-and-forget: try to recover the (possibly completed) response
@@ -3382,6 +3393,7 @@ export function ChatView({
           const _recoverMsgId = assistantMsg.id;
           const _recoverUserTs = userMsg.timestamp;
           const _recoverKey = STORAGE_KEY_MSGS_PREFIX + thisConvId;
+          const _recoverDelay = isAppResumeAbort ? 4000 : 3000;
           setTimeout(() => {
             safeFetch(`${apiBase}/api/sessions/${encodeURIComponent(convId)}/history`)
               .then((r) => r.ok ? r.json() : null)
@@ -3417,7 +3429,7 @@ export function ChatView({
                 });
               })
               .catch(() => {});
-          }, 3000);
+          }, _recoverDelay);
         }
       }
     } finally {

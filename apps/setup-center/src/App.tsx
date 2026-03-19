@@ -822,25 +822,50 @@ export function App() {
   }, []);
 
   // ── 页面可见性监听（休眠/睡眠恢复感知）──
+  // Capacitor 环境下 visibilitychange 和 appStateChange 可能同时触发，
+  // 用 lastResumeRef 做 3 秒去重避免 WS 双重重连。
+  const lastResumeRef = useRef(0);
+  const handleAppResumed = useCallback(() => {
+    const now = Date.now();
+    if (now - lastResumeRef.current < 3000) return;
+    lastResumeRef.current = now;
+    visibilityGraceRef.current = true;
+    heartbeatFailCount.current = 0;
+    setTimeout(() => { visibilityGraceRef.current = false; }, 10000);
+    reconnectWsNow();
+    window.dispatchEvent(new Event("openakita_app_resumed"));
+    logger.info("App", "Resumed from background");
+  }, []);
+
   useEffect(() => {
     const handler = () => {
       const visible = !document.hidden;
       setPageVisible(visible);
-      if (visible) {
-        // 从 hidden 恢复：给 10 秒宽限期，前 2 次心跳失败不计
-        visibilityGraceRef.current = true;
-        heartbeatFailCount.current = 0;
-        setTimeout(() => { visibilityGraceRef.current = false; }, 10000);
-        // 立即重连 WebSocket（后台期间连接可能已断开）
-        reconnectWsNow();
-        // 通知 ChatView 等组件检查进行中的 SSE 流
-        window.dispatchEvent(new Event("openakita_app_resumed"));
-        logger.info("App", "Resumed from background");
-      }
+      if (visible) handleAppResumed();
     };
     document.addEventListener("visibilitychange", handler);
     return () => document.removeEventListener("visibilitychange", handler);
-  }, []);
+  }, [handleAppResumed]);
+
+  // ── Capacitor: 原生 appStateChange 补充 ──
+  // iOS WKWebView 进入后台时可能被系统挂起，visibilitychange 不一定触发。
+  // @capacitor/app 提供原生级生命周期事件，100% 可靠。
+  useEffect(() => {
+    if (!IS_CAPACITOR) return;
+    let cancelled = false;
+    let removeListener: (() => void) | undefined;
+    import("@capacitor/app").then(({ App }) => {
+      if (cancelled) return;
+      App.addListener("appStateChange", ({ isActive }) => {
+        setPageVisible(isActive);
+        if (isActive) handleAppResumed();
+      }).then((handle) => {
+        if (cancelled) { handle.remove(); return; }
+        removeListener = () => handle.remove();
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; removeListener?.(); };
+  }, [handleAppResumed]);
 
   // ── 心跳轮询：三级状态机 + 防误判 ──
   useEffect(() => {
