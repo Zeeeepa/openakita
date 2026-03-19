@@ -856,6 +856,9 @@ class MessageGateway:
         self.agent_handler_stream = None  # set by main.py for streaming IM support
         self.stt_client = stt_client
 
+        from .bot_config import BotConfigStore
+        self.bot_config = BotConfigStore()
+
         # 注册的适配器 {channel_name: adapter}
         self._adapters: dict[str, ChannelAdapter] = {}
 
@@ -2289,6 +2292,13 @@ class MessageGateway:
 
             # ==================== 正常消息处理流程 ====================
 
+            # 0. Bot 开关检查（必须在 typing 之前，避免禁用会话触发 typing）
+            if not self.bot_config.is_enabled(message.channel, message.chat_id, message.user_id):
+                logger.debug(
+                    f"[Gateway] Bot disabled for {message.channel}:{message.chat_id}:{message.user_id}, skipping"
+                )
+                return
+
             # 1. 启动持续 typing 状态（覆盖预处理 + Agent 全流程）
             typing_task = asyncio.create_task(self._keep_typing(message))
 
@@ -3123,7 +3133,7 @@ class MessageGateway:
                     if not reply_text:
                         reply_text = f"处理出错: {err_msg}"
                 elif etype == "done":
-                    break
+                    pass
 
         try:
             await asyncio.wait_for(_consume_stream(), timeout=_STREAM_TIMEOUT)

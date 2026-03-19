@@ -11,12 +11,18 @@ import {
 } from "../icons";
 import { safeFetch } from "../providers";
 import { ModalOverlay } from "../components/ModalOverlay";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { logger } from "../platform";
 import { IS_WEB, onWsEvent } from "../platform";
 import { FeishuQRModal } from "../components/FeishuQRModal";
 import { QQBotQRModal } from "../components/QQBotQRModal";
 import { WecomQRModal } from "../components/WecomQRModal";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Bot, BotOff, Loader2, RefreshCw, X } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -41,6 +47,7 @@ type IMSession = {
   lastActive: string;
   messageCount: number;
   lastMessage: string | null;
+  botEnabled?: boolean;
 };
 
 type ChainSummaryItem = {
@@ -159,17 +166,17 @@ export function IMView({
 
   if (!serviceRunning) {
     return (
-      <div className="imViewEmpty">
+      <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
         <IconIM size={48} />
-        <div style={{ marginTop: 12, fontWeight: 600 }}>{t("im.channels")}</div>
-        <div style={{ marginTop: 4, opacity: 0.5, fontSize: 13 }}>后端服务未启动，请启动后再进行使用</div>
+        <div className="mt-3 font-semibold">{t("im.channels")}</div>
+        <div className="mt-1 text-xs opacity-50">后端服务未启动，请启动后再进行使用</div>
       </div>
     );
   }
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+    <div className="flex flex-col h-full">
+      <div className="flex-1 min-h-0 overflow-auto">
         <MessagesTab serviceRunning={serviceRunning} apiBase={api} />
       </div>
     </div>
@@ -186,6 +193,8 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<IMMessage[]>([]);
   const [totalMessages, setTotalMessages] = useState(0);
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const getChannelDisplayName = useCallback((ch: IMChannel): string => {
     const key = `status.${(ch.channel || "").toLowerCase()}`;
@@ -224,6 +233,27 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     } catch { /* ignore */ }
   }, [serviceRunning, apiBase]);
 
+  const deleteSession = useCallback(async (sessionId: string) => {
+    try {
+      await safeFetch(`${apiBase}/api/im/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    } catch { /* ignore */ }
+    if (selectedSessionId === sessionId) {
+      setSelectedSessionId(null);
+      setMessages([]);
+    }
+    if (selectedChannel) fetchSessions(selectedChannel);
+  }, [apiBase, selectedChannel, selectedSessionId, fetchSessions]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await fetchChannels();
+      if (selectedChannel) await fetchSessions(selectedChannel);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchChannels, fetchSessions, selectedChannel]);
+
   useEffect(() => { fetchChannels(); }, [fetchChannels]);
 
   useEffect(() => {
@@ -254,6 +284,9 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
         }
         if (selectedSessionId) fetchMessages(selectedSessionId);
       }
+      if (event === "im:bot_config_changed") {
+        if (selectedChannel) fetchSessions(selectedChannel);
+      }
     });
   }, [fetchChannels, fetchSessions, fetchMessages, selectedChannel, selectedSessionId]);
 
@@ -274,104 +307,217 @@ function MessagesTab({ serviceRunning, apiBase }: { serviceRunning: boolean; api
     fetchMessages(sid);
   }, [fetchMessages]);
 
+  const handleDeleteSession = useCallback((s: IMSession, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const name = s.chatType === "group"
+      ? (s.chatName || s.chatId || s.sessionId.slice(0, 12))
+      : (s.displayName || s.userId || s.chatId || s.sessionId.slice(0, 12));
+    setConfirmDialog({
+      message: `确定要删除会话「${name}」吗？\n会话消息历史将被保留，但会话将从列表中移除。`,
+      onConfirm: () => deleteSession(s.sessionId),
+    });
+  }, [deleteSession]);
+
+  const handleToggleBot = useCallback(async (s: IMSession, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newEnabled = s.botEnabled === false;
+    setSessions((prev) => prev.map((x) => x.sessionId === s.sessionId ? { ...x, botEnabled: newEnabled } : x));
+    try {
+      await safeFetch(`${apiBase}/api/im/bot-config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel: s.channel,
+          chat_id: s.chatId || "",
+          user_id: "*",
+          enabled: newEnabled,
+        }),
+      });
+      if (selectedChannel) fetchSessions(selectedChannel);
+    } catch {
+      setSessions((prev) => prev.map((x) => x.sessionId === s.sessionId ? { ...x, botEnabled: s.botEnabled } : x));
+    }
+  }, [apiBase, selectedChannel, fetchSessions]);
+
   return (
-    <div className="imView">
-      <div className="imLeft">
-        <div className="imSectionTitle">
-          <span>{t("im.channels")}</span>
-          <button className="imRefreshBtn" onClick={fetchChannels} title={t("topbar.refresh")}><IconRefresh size={13} /></button>
-        </div>
-        <div className="imChannelList">
-          {channels.length === 0 && <div className="imEmptyHint">{t("im.noChannels")}</div>}
-          {channels.map((ch) => (
-            <div
-              key={ch.channel}
-              className={`imChannelItem ${selectedChannel === ch.channel ? "imChannelItemActive" : ""}`}
-              onClick={() => handleSelectChannel(ch.channel)}
-              role="button"
-              tabIndex={0}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {ch.status === "online" ? <DotGreen /> : <DotGray />}
-                {(IM_LOGO_MAP[(ch.channel_type || "").toLowerCase()] || IM_LOGO_MAP[(ch.channel || "").toLowerCase()])?.({ size: 14 })}
-                <span className="imChannelName">{getChannelDisplayName(ch)}</span>
+    <>
+      <div className="imView">
+        {/* ── Left sidebar: channels + sessions ── */}
+        <div className="imLeft">
+          {/* Channel list header */}
+          <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
+            <span className="text-sm font-semibold text-foreground">{t("im.channels")}</span>
+            <Button variant="outline" size="sm" className="h-6 px-2 text-[11px] gap-1" onClick={handleRefresh} disabled={refreshing}>
+              {refreshing ? <Loader2 className="animate-spin size-3" /> : <RefreshCw className="size-3" />}
+              {t("topbar.refresh")}
+            </Button>
+          </div>
+
+          {/* Channel list */}
+          <div className="px-1.5">
+            {channels.length === 0 && (
+              <div className="px-4 py-4 text-center text-xs text-muted-foreground">{t("im.noChannels")}</div>
+            )}
+            {channels.map((ch) => (
+              <button
+                key={ch.channel}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[13px] transition-colors cursor-pointer select-none",
+                  selectedChannel === ch.channel
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-accent/50"
+                )}
+                onClick={() => handleSelectChannel(ch.channel)}
+              >
+                <span className="flex items-center gap-1.5 min-w-0">
+                  {ch.status === "online" ? <DotGreen /> : <DotGray />}
+                  {(IM_LOGO_MAP[(ch.channel_type || "").toLowerCase()] || IM_LOGO_MAP[(ch.channel || "").toLowerCase()])?.({ size: 14 })}
+                  <span className="font-semibold truncate">{getChannelDisplayName(ch)}</span>
+                </span>
+                <Badge variant="secondary" className="ml-1.5 h-5 min-w-[20px] justify-center text-[11px] px-1.5">
+                  {ch.sessionCount}
+                </Badge>
+              </button>
+            ))}
+          </div>
+
+          {/* Session list */}
+          {selectedChannel && (
+            <>
+              <div className="flex items-center justify-between px-3 pt-3 pb-1.5">
+                <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wide">{t("im.sessions")}</span>
               </div>
-              <span className="imChannelCount">{ch.sessionCount}</span>
-            </div>
-          ))}
+              <div className="px-1.5">
+                {sessions.length === 0 && (
+                  <div className="px-4 py-4 text-center text-xs text-muted-foreground">{t("im.noSessions")}</div>
+                )}
+                <TooltipProvider delayDuration={400}>
+                  {sessions.map((s) => (
+                    <div
+                      key={s.sessionId}
+                      className={cn(
+                        "group flex items-center justify-between rounded-lg px-2.5 py-2 text-[13px] transition-colors cursor-pointer select-none gap-1.5",
+                        selectedSessionId === s.sessionId
+                          ? "bg-accent text-accent-foreground"
+                          : "hover:bg-accent/50",
+                        s.botEnabled === false && "opacity-50",
+                      )}
+                      onClick={() => handleSelectSession(s.sessionId)}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        {s.chatType === "group" ? <IconUsers size={13} className="shrink-0" /> : <IconUser size={13} className="shrink-0" />}
+                        <span className="font-semibold truncate text-[13px]">
+                          {s.chatType === "group"
+                            ? (s.chatName || s.chatId || s.sessionId.slice(0, 12))
+                            : (s.displayName || s.userId || s.chatId || s.sessionId.slice(0, 12))}
+                        </span>
+                        {s.chatType === "group" && s.chatName && s.displayName && (
+                          <span className="text-[11px] text-muted-foreground truncate">({s.displayName})</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Badge variant="outline" className="h-5 min-w-[20px] justify-center text-[11px] px-1.5">
+                          {s.messageCount}
+                        </Badge>
+                        <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                          {s.lastActive ? new Date(s.lastActive).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className={cn(
+                                "opacity-0 group-hover:opacity-100 transition-opacity",
+                                s.botEnabled !== false
+                                  ? "text-emerald-500 hover:text-emerald-600"
+                                  : "text-destructive hover:text-destructive/80",
+                              )}
+                              onClick={(e) => handleToggleBot(s, e)}
+                            >
+                              {s.botEnabled !== false ? <Bot className="size-4" /> : <BotOff className="size-4" />}
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            {s.botEnabled !== false ? t("im.disableBot") : t("im.enableBot")}
+                          </TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive"
+                              onClick={(e) => handleDeleteSession(s, e)}
+                            >
+                              <X className="size-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="right" className="text-xs">删除会话</TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </div>
+                  ))}
+                </TooltipProvider>
+              </div>
+            </>
+          )}
         </div>
 
-        {selectedChannel && (
-          <>
-            <div className="imSectionTitle" style={{ marginTop: 8 }}>
-              <span>{t("im.sessions")}</span>
+        {/* ── Right: message area ── */}
+        <div className="imRight">
+          {!selectedSessionId ? (
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+              <IconMessageCircle size={40} />
+              <div className="mt-2 text-xs opacity-50">{t("im.noMessages")}</div>
             </div>
-            <div className="imSessionList">
-              {sessions.length === 0 && <div className="imEmptyHint">{t("im.noSessions")}</div>}
-              {sessions.map((s) => (
-                <div
-                  key={s.sessionId}
-                  className={`imSessionItem ${selectedSessionId === s.sessionId ? "imSessionItemActive" : ""}`}
-                  onClick={() => handleSelectSession(s.sessionId)}
-                  role="button"
-                  tabIndex={0}
-                >
-                  <div className="imSessionLeft">
-                    {s.chatType === "group" ? <IconUsers size={13} /> : <IconUser size={13} />}
-                    <span className="imSessionName">
-                      {s.chatType === "group"
-                        ? (s.chatName || s.chatId || s.sessionId.slice(0, 12))
-                        : (s.displayName || s.userId || s.chatId || s.sessionId.slice(0, 12))}
-                    </span>
-                    {s.chatType === "group" && s.chatName && s.displayName && (
-                      <span className="text-xs opacity-50 ml-1">({s.displayName})</span>
+          ) : (
+            <div className="flex flex-col h-full">
+              {/* Messages header */}
+              <div className="px-4 py-2.5 border-b text-xs font-bold text-muted-foreground">
+                {t("im.messages")} ({totalMessages})
+              </div>
+              {/* Messages list */}
+              <div className="flex-1 overflow-auto px-4 py-3 space-y-3">
+                {messages.map((msg, idx) => (
+                  <div key={idx}>
+                    <div className="flex items-center gap-2 mb-1">
+                      <Badge
+                        variant={msg.role === "user" ? "default" : msg.role === "system" ? "outline" : "secondary"}
+                        className="text-[10px] px-1.5 py-0 h-[18px]"
+                      >
+                        {msg.role === "user" ? t("im.user") : msg.role === "system" ? t("im.system") : t("im.bot")}
+                      </Badge>
+                      <span className="text-[10px] text-muted-foreground">
+                        {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ""}
+                      </span>
+                    </div>
+                    {msg.role !== "user" && msg.chain_summary && msg.chain_summary.length > 0 && (
+                      <IMChainSummary chain={msg.chain_summary} />
                     )}
+                    <div className={cn(
+                      "text-[13px] leading-relaxed p-2.5 rounded-lg border",
+                      msg.role === "user"
+                        ? "bg-primary/[0.04] border-primary/[0.12]"
+                        : "bg-muted/50 border-border"
+                    )}>
+                      <MediaContent content={msg.content} />
+                    </div>
                   </div>
-                  <div className="imSessionRight">
-                    <span className="imSessionCount">{s.messageCount}</span>
-                    <span className="imSessionTime">
-                      {s.lastActive ? new Date(s.lastActive).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                ))}
+                {messages.length === 0 && (
+                  <div className="px-4 py-4 text-center text-xs text-muted-foreground">{t("im.noMessages")}</div>
+                )}
+              </div>
             </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
 
-      <div className="imRight">
-        {!selectedSessionId ? (
-          <div className="imViewEmpty">
-            <IconMessageCircle size={40} />
-            <div style={{ marginTop: 8, opacity: 0.5, fontSize: 13 }}>{t("im.noMessages")}</div>
-          </div>
-        ) : (
-          <div className="imMessages">
-            <div className="imMessagesHeader">
-              <span>{t("im.messages")} ({totalMessages})</span>
-            </div>
-            <div className="imMessagesList">
-              {messages.map((msg, idx) => (
-                <div key={idx} className={`imMsg ${msg.role === "user" ? "imMsgUser" : "imMsgBot"}`}>
-                  <div className="imMsgRole">
-                    {msg.role === "user" ? t("im.user") : msg.role === "system" ? t("im.system") : t("im.bot")}
-                    <span className="imMsgTime">{msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ""}</span>
-                  </div>
-                  {msg.role !== "user" && msg.chain_summary && msg.chain_summary.length > 0 && (
-                    <IMChainSummary chain={msg.chain_summary} />
-                  )}
-                  <div className="imMsgContent">
-                    <MediaContent content={msg.content} />
-                  </div>
-                </div>
-              ))}
-              {messages.length === 0 && <div className="imEmptyHint">{t("im.noMessages")}</div>}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+      <ConfirmDialog dialog={confirmDialog} onClose={() => setConfirmDialog(null)} />
+    </>
   );
 }
 
