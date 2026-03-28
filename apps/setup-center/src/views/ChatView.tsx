@@ -2268,14 +2268,17 @@ export function ChatView({
     return () => { cancelled = true; clearInterval(timer); };
   }, [serviceRunning, apiBaseUrl, getClientId]);
 
+  // ── Cross-device sync: conversation lifecycle events via WebSocket ──
+  // onWsEvent handles platform detection internally (no-op for Tauri local,
+  // active for Web / Capacitor / Tauri-remote).
   useEffect(() => {
-    if (!IS_WEB) return;
     const myId = getClientId();
     return onWsEvent((event, data) => {
       const d = data as Record<string, unknown> | null;
       if (!d) return;
       const convId = d.conversation_id as string | undefined;
       if (!convId) return;
+
       if (event === "chat:busy") {
         const clientId = d.client_id as string;
         if (clientId !== myId) {
@@ -2284,11 +2287,43 @@ export function ChatView({
       } else if (event === "chat:idle") {
         setBusyConversations((prev) => { const m = new Map(prev); m.delete(convId); return m; });
       } else if (event === "chat:message_update") {
+        const clientId = d.client_id as string | undefined;
+        if (clientId && clientId === myId) return;
         if (convId === activeConvIdRef.current) {
           safeFetch(`${apiBaseUrl}/api/sessions/${encodeURIComponent(convId)}/history`)
             .then((r) => r.json())
             .then((d2) => { if (d2?.messages?.length) setMessages((prev) => patchMessagesWithBackend(prev, d2.messages)); })
             .catch(() => {});
+        }
+        const preview = (d.last_message_preview as string) || "";
+        const ts = ((d.timestamp as number) || 0) * 1000 || Date.now();
+        setConversations((prev) => {
+          const idx = prev.findIndex(c => c.id === convId);
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], lastMessage: preview || updated[idx].lastMessage, timestamp: Math.max(updated[idx].timestamp || 0, ts), messageCount: (updated[idx].messageCount || 0) + 1 };
+            return updated;
+          }
+          return [{ id: convId, title: preview.slice(0, 20) || "对话", lastMessage: preview, timestamp: ts, messageCount: 1 }, ...prev];
+        });
+      } else if (event === "chat:conversation_deleted") {
+        setConversations((prev) => {
+          const filtered = prev.filter(c => c.id !== convId);
+          if (filtered.length < prev.length) {
+            try { localStorage.removeItem(STORAGE_KEY_MSGS_PREFIX + convId); } catch {}
+          }
+          return filtered;
+        });
+        if (activeConvIdRef.current === convId) {
+          setActiveConvId(null);
+          setMessages([]);
+        }
+      } else if (event === "chat:title_update") {
+        const title = d.title as string;
+        if (title) {
+          setConversations((prev) => prev.map(c =>
+            c.id === convId ? { ...c, title, titleGenerated: true } : c
+          ));
         }
       }
     });
@@ -3507,7 +3542,7 @@ export function ChatView({
               const res = await safeFetch(`${apiBase}/api/sessions/generate-title`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: text }),
+                body: JSON.stringify({ message: text, conversation_id: thisConvId }),
                 signal: AbortSignal.timeout(15000),
               });
               const data = await res.json();
